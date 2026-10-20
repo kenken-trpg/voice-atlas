@@ -18,6 +18,9 @@
 | OpenAI          | https://developers.openai.com/api/docs/guides/structured-outputs                              | JSONスキーマによる構造化出力                       |
 | Ollama          | https://docs.ollama.com/capabilities/vision                                                   | ローカル画像入力のbase64形式                       |
 | Ollama          | https://docs.ollama.com/capabilities/structured-outputs                                       | JSONスキーマ指定                                   |
+| Anthropic       | https://platform.claude.com/docs/en/build-with-claude/vision                                  | Claude Messages APIの画像入力                      |
+| Anthropic       | https://platform.claude.com/docs/en/build-with-claude/structured-outputs                      | 構造化出力、スキーマの制約と応答検証               |
+| Anthropic       | https://platform.claude.com/docs/en/models/overview                                           | 画像対応モデルとAPIモデルID                        |
 
 数値の提案はVOICEVOXに限り、アプリ側の安全な調整範囲を使用します。API上の全許容範囲や、メーカー推奨の設定値という意味ではありません。
 

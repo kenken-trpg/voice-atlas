@@ -1,5 +1,14 @@
 import { z } from 'zod';
 
+export const providerSchema = z.enum(['ollama', 'openai', 'anthropic']);
+export type Provider = z.infer<typeof providerSchema>;
+export const providerLabels: Record<Provider, string> = {
+  ollama: 'Ollama',
+  openai: 'OpenAI',
+  anthropic: 'Anthropic（Claude）',
+};
+export const defaultAnthropicModel = 'claude-sonnet-5-5';
+
 export const axes = ['pitch', 'energy', 'warmth', 'airiness'] as const;
 export const axisLabels: Record<(typeof axes)[number], string> = {
   pitch: '声の高さ',
@@ -128,6 +137,7 @@ export interface Recommendation {
 export interface Capabilities {
   ollama: { ready: boolean; model: string; detail: string };
   openai: { ready: boolean; model: string };
+  anthropic: { ready: boolean; model: string };
   voicevox: { ready: boolean; detail: string };
 }
 export const defaultText =

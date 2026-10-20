@@ -2,6 +2,8 @@ import sharp from 'sharp';
 import { z } from 'zod';
 import {
   analysisSchema,
+  providerLabels,
+  type Provider,
   type Analysis,
   type Capabilities,
   type Recipe,
@@ -101,6 +103,7 @@ export async function capabilities(
         : 'Ollamaと画像対応モデルを起動してください',
     },
     openai: { ready: Boolean(config.openaiKey), model: config.openaiModel },
+    anthropic: { ready: Boolean(config.anthropicKey), model: config.anthropicModel },
     voicevox: {
       ready: voicevox.status === 'fulfilled',
       detail:
@@ -141,13 +144,18 @@ subjectFoundは人物・キャラクター・マスコットなど声を当て�
 summaryは「〜という演出案です」のように創作上の提案だと分かる短い説明。cuesは画像で確認できる具体的な視覚要素のみ（最大5個）。deliveryは話し方の提案。profileの4軸は0〜100：pitch=低い声〜高い声、energy=静か〜活発、warmth=シャープ〜柔らかい、airiness=張り〜息の多い声。ソフト名や話者名は生成しないでください。JSONスキーマに従ってください。`;
 export async function analyzeImage(
   config: Config,
-  input: { provider: 'ollama' | 'openai'; image: string; direction: string; consent: boolean },
+  input: { provider: Provider; image: string; direction: string; consent: boolean },
   fetcher: Fetcher = fetch,
 ): Promise<Analysis> {
-  if (input.provider === 'openai' && !input.consent)
-    throw new AppError(400, 'OpenAIへ画像と補足を送信することに同意してください。');
+  if (input.provider !== 'ollama' && !input.consent)
+    throw new AppError(
+      400,
+      `${providerLabels[input.provider]}へ画像と補足を送信することに同意してください。`,
+    );
   if (input.provider === 'openai' && !config.openaiKey)
     throw new AppError(503, 'サーバーの.envにOPENAI_API_KEYを設定してください。');
+  if (input.provider === 'anthropic' && !config.anthropicKey)
+    throw new AppError(503, 'サーバーの.envにANTHROPIC_API_KEYを設定してください。');
   if (input.provider === 'ollama' && /cloud/i.test(config.ollamaModel))
     throw new AppError(400, 'ローカル解析にはダウンロード済みのローカルモデルを指定してください。');
   const image = await sanitizeImage(input.image);
@@ -181,6 +189,88 @@ export async function analyzeImage(
         'Ollamaから解析結果を取得できませんでした。モデルを確認してください。',
       );
     raw = result.data.message.content;
+  } else if (input.provider === 'anthropic') {
+    // Claude's JSON schema subset does not accept range/length constraints.
+    // Preserve them as hints, and validate the result with analysisSchema below.
+    const claudeSchema = z.toJSONSchema(analysisSchema, {
+      override: ({ jsonSchema }) => {
+        const node = jsonSchema as Record<string, unknown>;
+        const hints: string[] = [];
+        for (const key of [
+          'minimum',
+          'maximum',
+          'minLength',
+          'maxLength',
+          'minItems',
+          'maxItems',
+        ]) {
+          if (key in node) {
+            hints.push(`${key}: ${node[key]}`);
+            delete node[key];
+          }
+        }
+        if (hints.length)
+          node.description = [node.description, ...hints].filter(Boolean).join('; ');
+      },
+    });
+    delete claudeSchema.$schema;
+    const response = await remoteJson(
+      'https://api.anthropic.com/v1/messages',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': config.anthropicKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: config.anthropicModel,
+          max_tokens: 4096,
+          system: systemPrompt,
+          messages: [
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'image',
+                  source: { type: 'base64', media_type: 'image/jpeg', data: image },
+                },
+                { type: 'text', text: content },
+              ],
+            },
+          ],
+          output_config: { format: { type: 'json_schema', schema: claudeSchema } },
+        }),
+      },
+      90_000,
+      fetcher,
+    );
+    const result = z
+      .object({
+        type: z.literal('message'),
+        stop_reason: z.string(),
+        content: z.array(z.object({ type: z.string(), text: z.string().optional() })),
+      })
+      .safeParse(response);
+    if (!result.success)
+      throw new AppError(
+        502,
+        'Claudeから解析結果を取得できませんでした。モデルを確認してください。',
+      );
+    if (result.data.stop_reason === 'refusal')
+      throw new AppError(
+        502,
+        'Claudeはこの画像の解析に応答できませんでした。別の画像や補足で再試行してください。',
+      );
+    if (result.data.stop_reason !== 'end_turn')
+      throw new AppError(
+        502,
+        'Claudeの画像解析が完了しませんでした。出力上限やモデルを確認して再試行してください。',
+      );
+    raw = result.data.content
+      .filter((item) => item.type === 'text')
+      .map((item) => item.text || '')
+      .join('');
   } else {
     const response = await remoteJson(
       'https://api.openai.com/v1/responses',

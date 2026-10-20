@@ -9,7 +9,7 @@
 ## できること
 
 - PNG・JPEG・WebPの画像を読み込み（8MB、25メガピクセル以下）
-- **Ollama**のローカル画像対応モデル、または任意設定の**OpenAI Responses API**で声の演出案を作成
+- **Ollama**のローカル画像対応モデル、または任意設定の**OpenAI Responses API／Anthropic Claude API**で声の演出案を作成
 - AIを使わず、声の高さ・活発さ・柔らかさ・息の多さを手動指定
 - 公式情報を参照した3ソフト・10話者のカタログから候補を比較
 - ソフト・無料ソフトで絞り込み
@@ -55,6 +55,21 @@ OPENAI_MODEL=gpt-4.1-mini
 サーバーを再起動し、画面でOpenAIを選んで、画像・補足の送信に同意すると利用できます。APIの利用料は利用者のアカウントに発生します。画像入力と構造化出力に対応し、ご自身のAPIプロジェクトで利用できるモデルを指定してください。接続表示はAPIキーの設定有無であり、利用権限や残高の検証ではありません。
 
 キーはブラウザーへ渡しません。画像は向き補正・縮小・メタデータ除去を行いJPEGに変換してから送信します。Responses APIには `store: false` を指定しますが、プロバイダー側の保持や処理条件については[OpenAIのデータ管理説明](https://developers.openai.com/api/docs/guides/your-data)を確認してください。
+
+### Anthropic Claudeで画像を解析する（任意）
+
+`.env` に次の2項目を設定します。まだファイルがない場合は `.env.example` を `.env` にコピーしてください。既存の `.env` は上書きせず、追記・編集します。
+
+```dotenv
+ANTHROPIC_API_KEY=ご自身のAnthropic APIキー
+ANTHROPIC_MODEL=claude-sonnet-5-5
+```
+
+サーバーを再起動し、画面の「提案の作り方」で **Claude** を選びます。画像と補足のAnthropicへの送信に同意してから解析してください。接続設定にはキーの設定有無とモデル名を表示します。表示はキーの設定確認であり、認証・利用権限の検証ではありません。
+
+キーはサーバー側だけで管理し、ブラウザーやJSONレシピへ渡しません。API利用料は利用者のAnthropicアカウントに発生します。ClaudeのWeb版の契約とは別に、Claude APIを利用できるキーが必要です。
+
+[Anthropic公式の画像入力仕様](https://platform.claude.com/docs/en/build-with-claude/vision)と[構造化出力仕様](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)に従い、JPEG画像と補足をMessages APIへ送信します。Claude用スキーマでは未対応の範囲・文字数制約を説明へ移し、応答をアプリ側で元の制約に沿って再検証します。画像入力と構造化出力に対応し、ご自身のアカウントで利用できるモデルを `ANTHROPIC_MODEL` に指定してください。
 
 ### VOICEVOXで試聴する（任意）
 

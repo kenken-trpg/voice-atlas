@@ -1,7 +1,7 @@
 import express, { type ErrorRequestHandler } from 'express';
 import { z } from 'zod';
 import { voices, catalogReviewedAt } from '../shared/catalog';
-import { preferencesSchema, profileSchema, recipeSchema } from '../shared/schema';
+import { preferencesSchema, profileSchema, recipeSchema, providerSchema } from '../shared/schema';
 import { recommend } from '../shared/recommend';
 import type { Config } from './config';
 import { analyzeImage, AppError, capabilities, synthesize, type Fetcher } from './services';
@@ -53,7 +53,7 @@ export function createApp(config: Config, fetcher: Fetcher = fetch) {
   app.post('/api/analyze', async (req, res) => {
     const input = z
       .object({
-        provider: z.enum(['ollama', 'openai']),
+        provider: providerSchema,
         image: z.string().max(11_200_000),
         direction: z.string().max(1000).default(''),
         consent: z.boolean().default(false),

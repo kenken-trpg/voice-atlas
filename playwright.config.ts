@@ -16,6 +16,7 @@ export default defineConfig({
     env: {
       PORT: '3211',
       OPENAI_API_KEY: '',
+      ANTHROPIC_API_KEY: '',
       OLLAMA_BASE_URL: 'http://127.0.0.1:1',
       VOICEVOX_BASE_URL: 'http://127.0.0.1:1',
     },

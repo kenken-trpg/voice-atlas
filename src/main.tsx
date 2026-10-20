@@ -22,6 +22,9 @@ import {
   axisLabels,
   defaultText,
   neutralProfile,
+  providerLabels,
+  defaultAnthropicModel,
+  type Provider,
   recipeFields,
   type Analysis,
   type Capabilities,
@@ -35,7 +38,7 @@ import { catalogReviewedAt, voices } from '../shared/catalog';
 import { recommend } from '../shared/recommend';
 import './styles.css';
 
-type Mode = 'manual' | 'ollama' | 'openai';
+type Mode = 'manual' | Provider;
 type ImageData = { url: string; name: string };
 const presets: { name: string; note: string; profile: Profile }[] = [
   {
@@ -122,6 +125,8 @@ function App() {
   const requestRef = useRef<AbortController | null>(null);
   const resultsRef = useRef<HTMLElement>(null);
   const detailRef = useRef<HTMLElement>(null);
+  const externalProvider = mode === 'openai' || mode === 'anthropic';
+  const providerName = mode === 'manual' ? '手動' : providerLabels[mode];
 
   async function refresh() {
     setChecking(true);
@@ -210,8 +215,8 @@ function App() {
       setError('解析したい人物やキャラクターの画像を選んでください。');
       return;
     }
-    if (mode === 'openai' && !consent) {
-      setError('画像と補足のOpenAIへの送信に同意してください。');
+    if (externalProvider && !consent) {
+      setError(`画像と補足の${providerName}への送信に同意してください。`);
       return;
     }
     const controller = new AbortController();
@@ -320,7 +325,7 @@ function App() {
               aria-expanded={settingsOpen}
             >
               <span
-                className={`status-dot ${caps?.ollama.ready || caps?.openai.ready ? 'online' : ''}`}
+                className={`status-dot ${caps?.ollama.ready || caps?.openai.ready || caps?.anthropic?.ready ? 'online' : ''}`}
               />
               <span>接続設定</span>
               <SlidersHorizontal size={15} />
@@ -398,6 +403,22 @@ function App() {
                 <small>
                   モデル: {caps?.openai.model || 'gpt-4.1-mini'}
                   。API利用料はご自身のアカウントに発生します。
+                </small>
+              </div>
+              <div>
+                <strong>
+                  <span className={`status-dot ${caps?.anthropic?.ready ? 'online' : ''}`} />
+                  Anthropic（Claude）
+                </strong>
+                <p>
+                  {caps?.anthropic?.ready
+                    ? 'APIキー設定済み（接続・利用権限は未検証）'
+                    : 'サーバーの .env にAPIキーを設定'}
+                </p>
+                <code>ANTHROPIC_API_KEY=…</code>
+                <small>
+                  モデル: {caps?.anthropic?.model || defaultAnthropicModel}
+                  。ANTHROPIC_MODELで変更できます。設定後はサーバーを再起動してください。API利用料はご自身のアカウントに発生します。
                 </small>
               </div>
               <div>
@@ -528,6 +549,7 @@ function App() {
                     { id: 'manual', label: '手動', hint: '設定不要' },
                     { id: 'ollama', label: 'Ollama', hint: 'ローカルAI' },
                     { id: 'openai', label: 'OpenAI', hint: '外部API' },
+                    { id: 'anthropic', label: 'Claude', hint: 'Anthropic API' },
                   ] as const
                 ).map((item) => (
                   <label key={item.id} className={mode === item.id ? 'active' : ''}>
@@ -558,7 +580,7 @@ function App() {
                   <p className="mode-note">
                     {mode === 'ollama'
                       ? '画像と補足をこのPCのOllamaへ送信し、声の演出案を作ります。'
-                      : '画像と補足をOpenAI APIへ送信します。APIキーはサーバー内で管理します。'}
+                      : `画像と補足を${providerName} APIへ送信します。APIキーはサーバー内で管理します。`}
                   </p>
                   <label className="field-label" htmlFor="direction">
                     演出の補足 <span>任意</span>
@@ -572,7 +594,7 @@ function App() {
                     placeholder="例：静かな案内役。低めの声で、丁寧に話してほしい。"
                     rows={3}
                   />
-                  {mode === 'openai' && (
+                  {externalProvider && (
                     <label className="consent">
                       <input
                         type="checkbox"
@@ -581,7 +603,7 @@ function App() {
                         onChange={(event) => setConsent(event.target.checked)}
                       />
                       <span>
-                        画像と補足をOpenAIに送信することに同意する（API利用料がかかります）
+                        画像と補足を{providerName}に送信することに同意する（API利用料がかかります）
                       </span>
                     </label>
                   )}
@@ -631,7 +653,7 @@ function App() {
                 disabled={
                   disabled ||
                   (mode !== 'manual' &&
-                    (!image || !providerReady || (mode === 'openai' && !consent)))
+                    (!image || !providerReady || (externalProvider && !consent)))
                 }
               >
                 {busy === 'analysis' ? (
@@ -718,9 +740,7 @@ function App() {
                     </h2>
                   </div>
                   <span className="source-badge">
-                    {source === 'manual'
-                      ? '手動で作成'
-                      : `${source === 'ollama' ? 'Ollama' : 'OpenAI'}で解析`}
+                    {source === 'manual' ? '手動で作成' : `${providerLabels[source]}で解析`}
                     {edited ? '・調整済み' : ''}
                   </span>
                 </div>

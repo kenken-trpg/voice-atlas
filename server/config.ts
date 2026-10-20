@@ -1,10 +1,13 @@
 import 'dotenv/config';
+import { defaultAnthropicModel } from '../shared/schema';
 export interface Config {
   port: number;
   ollamaUrl: string;
   ollamaModel: string;
   openaiKey: string;
   openaiModel: string;
+  anthropicKey: string;
+  anthropicModel: string;
   voicevoxUrl: string;
 }
 export function loopbackUrl(raw: string): string {
@@ -34,6 +37,8 @@ export function loadConfig(): Config {
     ollamaModel: process.env.OLLAMA_MODEL || 'gemma3:4b',
     openaiKey: process.env.OPENAI_API_KEY || '',
     openaiModel: process.env.OPENAI_MODEL || 'gpt-4.1-mini',
+    anthropicKey: (process.env.ANTHROPIC_API_KEY || '').trim(),
+    anthropicModel: process.env.ANTHROPIC_MODEL || defaultAnthropicModel,
     voicevoxUrl: loopbackUrl(process.env.VOICEVOX_BASE_URL || 'http://127.0.0.1:50021'),
   };
 }

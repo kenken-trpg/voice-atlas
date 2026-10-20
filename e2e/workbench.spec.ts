@@ -3,6 +3,7 @@ import sharp from 'sharp';
 const unavailable = {
   ollama: { ready: false, model: 'test', detail: '未接続' },
   openai: { ready: false, model: 'test' },
+  anthropic: { ready: false, model: 'test-claude' },
   voicevox: { ready: false, detail: '未接続' },
 };
 test.beforeEach(async ({ page }) => {
@@ -42,47 +43,87 @@ test('exports the chosen voice and edited recipe without embedding the image', a
   expect(result.manuallyAdjusted).toBe(true);
   expect(result.image).toBeUndefined();
 });
-test('uploads an image locally and requires consent for external vision', async ({ page }) => {
-  await page.route('**/api/capabilities', (route) =>
-    route.fulfill({ json: { ...unavailable, openai: { ready: true, model: 'test-vision' } } }),
-  );
-  await page.goto('/');
-  const image = await sharp({
-    create: { width: 64, height: 80, channels: 3, background: '#81a292' },
-  })
-    .png()
-    .toBuffer();
-  await page
-    .locator('#character-image')
-    .setInputFiles({ name: 'test-character.png', mimeType: 'image/png', buffer: image });
-  await expect(page.getByAltText('選択した人物またはキャラクターの画像')).toBeVisible();
-  await page.getByRole('radio', { name: 'OpenAI' }).check();
-  await expect(page.getByRole('button', { name: '画像から声の演出案を作る' })).toBeDisabled();
-  let sent = false;
-  await page.route('**/api/analyze', async (route) => {
-    sent = true;
-    const input = route.request().postDataJSON();
-    expect(input.consent).toBe(true);
-    expect(input.image).toMatch(/^data:image\/png;base64,/);
-    await route.fulfill({
-      json: {
-        analysis: {
-          subjectFound: true,
-          summary: '凛とした案内役という演出案です。',
-          cues: ['緑の配色'],
-          delivery: '落ち着いたテンポで。',
-          profile: { pitch: 30, energy: 35, warmth: 45, airiness: 30 },
+for (const { provider, label, display } of [
+  { provider: 'openai', label: 'OpenAI', display: 'OpenAI' },
+  { provider: 'anthropic', label: 'Claude', display: 'Anthropic（Claude）' },
+]) {
+  test(`${label} image analysis requires provider-specific consent`, async ({ page }) => {
+    await page.route('**/api/capabilities', (route) =>
+      route.fulfill({
+        json: {
+          ...unavailable,
+          openai: { ready: true, model: 'test-openai' },
+          anthropic: { ready: true, model: 'test-claude' },
         },
-        provider: 'openai',
-      },
+      }),
+    );
+    await page.goto('/');
+    const image = await sharp({
+      create: { width: 64, height: 80, channels: 3, background: '#81a292' },
+    })
+      .png()
+      .toBuffer();
+    await page
+      .locator('#character-image')
+      .setInputFiles({ name: 'test-character.png', mimeType: 'image/png', buffer: image });
+    await page.getByRole('radio', { name: label }).check();
+    await expect(page.getByRole('button', { name: '画像から声の演出案を作る' })).toBeDisabled();
+    await page.locator('#direction').fill('落ち着いた案内役');
+    let sent = false;
+    await page.route('**/api/analyze', async (route) => {
+      const input = route.request().postDataJSON();
+      expect(input.provider).toBe(provider);
+      expect(input.consent).toBe(true);
+      expect(input.direction).toBe('落ち着いた案内役');
+      expect(input.image).toMatch(/^data:image\/png;base64,/);
+      sent = true;
+      await route.fulfill({
+        json: {
+          analysis: {
+            subjectFound: true,
+            summary: '凛とした案内役という演出案です。',
+            cues: ['緑の配色'],
+            delivery: '落ち着いたテンポで。',
+            profile: { pitch: 30, energy: 35, warmth: 45, airiness: 30 },
+          },
+          provider,
+        },
+      });
     });
+    await page
+      .getByRole('checkbox', {
+        name: `画像と補足を${display}に送信することに同意する（API利用料がかかります）`,
+        exact: true,
+      })
+      .check();
+    await page.getByRole('button', { name: '画像から声の演出案を作る' }).click();
+    await expect(page.getByText('凛とした案内役という演出案です。')).toBeVisible();
+    expect(sent).toBe(true);
+    await expect(page.locator('.source-badge')).toContainText(`${display}で解析`);
+    await page.getByLabel('声の高さ', { exact: false }).first().fill('55');
+    await expect(page.locator('.source-badge')).toContainText('調整済み');
+    await page.getByRole('radio', { name: label === 'Claude' ? 'OpenAI' : 'Claude' }).check();
+    await expect(page.locator('.consent input')).not.toBeChecked();
+    await expect(page.getByRole('button', { name: '画像から声の演出案を作る' })).toBeDisabled();
+    await page.getByRole('radio', { name: label }).check();
+    await expect(page.locator('.consent input')).not.toBeChecked();
   });
-  await page.getByRole('checkbox', { name: /画像と補足をOpenAI/ }).check();
-  await page.getByRole('button', { name: '画像から声の演出案を作る' }).click();
-  await expect(page.getByText('凛とした案内役という演出案です。')).toBeVisible();
-  expect(sent).toBe(true);
-  await page.getByLabel('声の高さ', { exact: false }).first().fill('55');
-  await expect(page.locator('.source-badge')).toContainText('調整済み');
+}
+test('Claude setup shows how to configure the server key without horizontal overflow', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.getByRole('radio', { name: 'Claude' }).check();
+  await page.getByRole('button', { name: '接続設定を開く' }).click();
+  const settings = page.getByRole('region', { name: '接続設定' });
+  await expect(settings.getByText('Anthropic（Claude）', { exact: true })).toBeVisible();
+  await expect(settings.getByText('ANTHROPIC_API_KEY=…')).toBeVisible();
+  await expect(settings.getByText(/モデル: test-claude/)).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+  await page.getByRole('button', { name: '接続設定を閉じる' }).click();
+  await expect(page.getByRole('button', { name: '画像から声の演出案を作る' })).toBeDisabled();
 });
 test('handles model failure without showing invented analysis', async ({ page }) => {
   await page.route('**/api/capabilities', (route) =>

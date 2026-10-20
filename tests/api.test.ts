@@ -6,7 +6,7 @@ import type { Config } from '../server/config';
 import { makeRecipe } from '../shared/recommend';
 import { voices } from '../shared/catalog';
 import { neutralProfile } from '../shared/schema';
-import { sanitizeImage } from '../server/services';
+import { analyzeImage, capabilities, sanitizeImage } from '../server/services';
 
 const config: Config = {
   port: 3210,
@@ -14,6 +14,8 @@ const config: Config = {
   ollamaModel: 'test-local-vision',
   openaiKey: 'test-key-not-real',
   openaiModel: 'test-vision',
+  anthropicKey: 'test-anthropic-key-not-real',
+  anthropicModel: 'test-claude-vision',
   voicevoxUrl: 'http://127.0.0.1:50021',
 };
 const mockFetch = vi.fn<typeof fetch>();
@@ -62,6 +64,8 @@ describe('local API boundaries', () => {
     const body = await response.json();
     expect(body.ollama.ready).toBe(true);
     expect(body.openai.ready).toBe(true);
+    expect(body.anthropic).toEqual({ ready: true, model: config.anthropicModel });
+    expect(JSON.stringify(body)).not.toContain(config.anthropicKey);
     expect(JSON.stringify(body)).not.toContain(config.openaiKey);
     expect(response.headers.get('cache-control')).toBe('no-store');
   });
@@ -228,7 +232,7 @@ describe('speaker resolution and synthesis parameters', () => {
 describe('provider failures and image metadata', () => {
   it('reports malformed provider envelopes as upstream failures', async () => {
     mockFetch.mockImplementation(async () => json({ unexpected: true }));
-    for (const provider of ['ollama', 'openai']) {
+    for (const provider of ['ollama', 'openai', 'anthropic']) {
       const response = await post('/api/analyze', { provider, image, consent: true });
       expect(response.status).toBe(502);
     }
@@ -268,5 +272,120 @@ describe('provider failures and image metadata', () => {
       json({ message: { content: JSON.stringify(analysis) } }),
     );
     expect((await post('/api/analyze', { provider: 'ollama', image })).status).toBe(200);
+  });
+});
+
+describe('Anthropic Claude vision (mocked, no paid requests)', () => {
+  const message = (value: unknown = analysis, stopReason = 'end_turn') => ({
+    type: 'message',
+    stop_reason: stopReason,
+    content: [
+      { type: 'thinking', thinking: 'not user-facing' },
+      { type: 'text', text: JSON.stringify(value) },
+    ],
+  });
+  it('requires explicit consent before contacting Anthropic', async () => {
+    const response = await post('/api/analyze', { provider: 'anthropic', image, consent: false });
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toContain('Anthropic');
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+  it('rejects missing API keys without making an external request', async () => {
+    await expect(
+      analyzeImage(
+        { ...config, anthropicKey: '' },
+        { provider: 'anthropic', image, direction: '', consent: true },
+        mockFetch,
+      ),
+    ).rejects.toMatchObject({ status: 503, message: expect.stringContaining('ANTHROPIC_API_KEY') });
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+  it('reports an unset key without pretending to have checked authentication', async () => {
+    mockFetch.mockImplementation(async (url) =>
+      String(url).endsWith('/api/show') ? json({ capabilities: ['vision'] }) : json([]),
+    );
+    const result = await capabilities({ ...config, anthropicKey: '' }, mockFetch);
+    expect(result.anthropic).toEqual({ ready: false, model: config.anthropicModel });
+    expect(mockFetch.mock.calls.every(([url]) => !String(url).includes('anthropic.com'))).toBe(
+      true,
+    );
+  });
+  it('sends JPEG, configured credentials, and a supported JSON schema to Messages', async () => {
+    mockFetch.mockResolvedValue(json(message()));
+    const response = await post('/api/analyze', {
+      provider: 'anthropic',
+      image,
+      direction: '穏やかな案内役',
+      consent: true,
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ analysis, provider: 'anthropic' });
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://api.anthropic.com/v1/messages');
+    expect(init?.headers).toMatchObject({
+      'x-api-key': config.anthropicKey,
+      'anthropic-version': '2023-06-01',
+    });
+    expect(init?.redirect).toBe('error');
+    const sent = JSON.parse(String(init?.body));
+    expect(sent.model).toBe(config.anthropicModel);
+    expect(sent.max_tokens).toBe(4096);
+    expect(sent.messages[0].content[0]).toMatchObject({
+      type: 'image',
+      source: { type: 'base64', media_type: 'image/jpeg' },
+    });
+    expect(
+      (await sharp(Buffer.from(sent.messages[0].content[0].source.data, 'base64')).metadata())
+        .format,
+    ).toBe('jpeg');
+    expect(sent.messages[0].content[1].text).toContain('穏やかな案内役');
+    const schema = sent.output_config.format.schema;
+    expect(sent.output_config.format.type).toBe('json_schema');
+    expect(schema.additionalProperties).toBe(false);
+    expect(schema.required).toContain('profile');
+    expect(schema.properties.profile.properties.pitch.description).toContain('maximum: 100');
+    expect(schema.properties.summary.description).toContain('maxLength: 500');
+    const encoded = JSON.stringify(schema);
+    for (const key of [
+      '$schema',
+      'minimum',
+      'maximum',
+      'minLength',
+      'maxLength',
+      'maxItems',
+      'minItems',
+    ])
+      expect(encoded).not.toContain(`"${key}":`);
+    expect(encoded).not.toContain(config.anthropicKey);
+  });
+  it.each(['refusal', 'max_tokens', 'pause_turn'])(
+    'rejects incomplete or refused output: %s',
+    async (stopReason) => {
+      mockFetch.mockResolvedValue(json(message(analysis, stopReason)));
+      const response = await post('/api/analyze', { provider: 'anthropic', image, consent: true });
+      expect(response.status).toBe(502);
+      expect((await response.json()).analysis).toBeUndefined();
+    },
+  );
+  it('enforces application bounds even after removing Claude schema restrictions', async () => {
+    for (const value of [
+      { ...analysis, profile: { ...neutralProfile, pitch: 101 } },
+      { ...analysis, summary: '' },
+      { ...analysis, cues: ['a', 'b', 'c', 'd', 'e', 'f'] },
+    ]) {
+      mockFetch.mockResolvedValueOnce(json(message(value)));
+      expect(
+        (await post('/api/analyze', { provider: 'anthropic', image, consent: true })).status,
+      ).toBe(502);
+    }
+  });
+  it('reports authentication errors without leaking raw provider messages or credentials', async () => {
+    mockFetch.mockResolvedValue(json({ error: { message: 'private-provider-error' } }, 401));
+    const response = await post('/api/analyze', { provider: 'anthropic', image, consent: true });
+    expect(response.status).toBe(502);
+    const body = await response.text();
+    expect(body).toContain('401');
+    expect(body).not.toContain('private-provider-error');
+    expect(body).not.toContain(config.anthropicKey);
   });
 });
