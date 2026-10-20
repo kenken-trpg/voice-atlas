@@ -4,6 +4,7 @@ const unavailable = {
   ollama: { ready: false, model: 'test', detail: '未接続' },
   openai: { ready: false, model: 'test' },
   anthropic: { ready: false, model: 'test-claude' },
+  gemini: { ready: false, model: 'test-gemini' },
   voicevox: { ready: false, detail: '未接続' },
 };
 test.beforeEach(async ({ page }) => {
@@ -46,6 +47,7 @@ test('exports the chosen voice and edited recipe without embedding the image', a
 for (const { provider, label, display } of [
   { provider: 'openai', label: 'OpenAI', display: 'OpenAI' },
   { provider: 'anthropic', label: 'Claude', display: 'Anthropic（Claude）' },
+  { provider: 'gemini', label: 'Gemini', display: 'Google（Gemini）' },
 ]) {
   test(`${label} image analysis requires provider-specific consent`, async ({ page }) => {
     await page.route('**/api/capabilities', (route) =>
@@ -54,6 +56,7 @@ for (const { provider, label, display } of [
           ...unavailable,
           openai: { ready: true, model: 'test-openai' },
           anthropic: { ready: true, model: 'test-claude' },
+          gemini: { ready: true, model: 'test-gemini' },
         },
       }),
     );
@@ -92,7 +95,7 @@ for (const { provider, label, display } of [
     });
     await page
       .getByRole('checkbox', {
-        name: `画像と補足を${display}に送信することに同意する（API利用料がかかります）`,
+        name: `画像と補足を${display}に送信することに同意する（API利用料がかかる場合があります）`,
         exact: true,
       })
       .check();
@@ -119,6 +122,22 @@ test('Claude setup shows how to configure the server key without horizontal over
   await expect(settings.getByText('Anthropic（Claude）', { exact: true })).toBeVisible();
   await expect(settings.getByText('ANTHROPIC_API_KEY=…')).toBeVisible();
   await expect(settings.getByText(/モデル: test-claude/)).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+  await page.getByRole('button', { name: '接続設定を閉じる' }).click();
+  await expect(page.getByRole('button', { name: '画像から声の演出案を作る' })).toBeDisabled();
+});
+test('Gemini setup shows how to configure the server key without horizontal overflow', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.getByRole('radio', { name: 'Gemini' }).check();
+  await page.getByRole('button', { name: '接続設定を開く' }).click();
+  const settings = page.getByRole('region', { name: '接続設定' });
+  await expect(settings.getByText('Google（Gemini）', { exact: true })).toBeVisible();
+  await expect(settings.getByText('GEMINI_API_KEY=…')).toBeVisible();
+  await expect(settings.getByText(/モデル: test-gemini/)).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );

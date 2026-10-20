@@ -9,7 +9,7 @@
 ## できること
 
 - PNG・JPEG・WebPの画像を読み込み（8MB、25メガピクセル以下）
-- **Ollama**のローカル画像対応モデル、または任意設定の**OpenAI Responses API／Anthropic Claude API**で声の演出案を作成
+- **Ollama**のローカル画像対応モデル、または任意設定の**OpenAI Responses API／Anthropic Claude API／Gemini API**で声の演出案を作成
 - AIを使わず、声の高さ・活発さ・柔らかさ・息の多さを手動指定
 - 公式情報を参照した3ソフト・10話者のカタログから候補を比較
 - ソフト・無料ソフトで絞り込み
@@ -70,6 +70,21 @@ ANTHROPIC_MODEL=claude-sonnet-5-5
 キーはサーバー側だけで管理し、ブラウザーやJSONレシピへ渡しません。API利用料は利用者のAnthropicアカウントに発生します。ClaudeのWeb版の契約とは別に、Claude APIを利用できるキーが必要です。
 
 [Anthropic公式の画像入力仕様](https://platform.claude.com/docs/en/build-with-claude/vision)と[構造化出力仕様](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)に従い、JPEG画像と補足をMessages APIへ送信します。Claude用スキーマでは未対応の範囲・文字数制約を説明へ移し、応答をアプリ側で元の制約に沿って再検証します。画像入力と構造化出力に対応し、ご自身のアカウントで利用できるモデルを `ANTHROPIC_MODEL` に指定してください。
+
+### Google Geminiで画像を解析する（任意）
+
+`.env` に次の2項目を設定します。ファイルがない場合は `.env.example` を `.env` にコピーしてください。既存の `.env` には追記・編集し、上書きしないでください。
+
+```dotenv
+GEMINI_API_KEY=ご自身のGemini APIキー
+GEMINI_MODEL=gemini-3.8-flash
+```
+
+サーバーを再起動し、画面の「提案の作り方」で **Gemini** を選択します。画像と補足のGoogleへの送信に同意してから解析してください。キーはサーバー側で管理し、ブラウザーやJSONレシピには含めません。接続設定の表示はキーの設定有無であり、認証・利用権限・利用枠の検証ではありません。
+
+キーは [Google AI Studio](https://aistudio.google.com/apikey) で用意できます。利用枠・料金・データの取り扱いは、ご自身のGoogle APIプロジェクトと利用プランの条件に従います。[Gemini APIの利用規約](https://ai.google.dev/gemini-api/terms)を確認してください。Geminiアプリの契約とは別に、Gemini APIで使用できるキーが必要です。
+
+[公式APIリファレンス](https://ai.google.dev/api/generate-content)に従い、画像をJPEGへ再エンコードして `generateContent` に送り、構造化された演出案を取得します。画像入力・構造化出力に対応し、ご自身のプロジェクトで利用可能なモデルを `GEMINI_MODEL` に指定してください。ブロック・出力途中での終了・不正応答はエラーとして表示し、不完全な提案を保存しません。
 
 ### VOICEVOXで試聴する（任意）
 

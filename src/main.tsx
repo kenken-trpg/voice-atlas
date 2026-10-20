@@ -24,6 +24,7 @@ import {
   neutralProfile,
   providerLabels,
   defaultAnthropicModel,
+  defaultGeminiModel,
   type Provider,
   recipeFields,
   type Analysis,
@@ -125,7 +126,7 @@ function App() {
   const requestRef = useRef<AbortController | null>(null);
   const resultsRef = useRef<HTMLElement>(null);
   const detailRef = useRef<HTMLElement>(null);
-  const externalProvider = mode === 'openai' || mode === 'anthropic';
+  const externalProvider = mode !== 'manual' && mode !== 'ollama';
   const providerName = mode === 'manual' ? '手動' : providerLabels[mode];
 
   async function refresh() {
@@ -325,7 +326,7 @@ function App() {
               aria-expanded={settingsOpen}
             >
               <span
-                className={`status-dot ${caps?.ollama.ready || caps?.openai.ready || caps?.anthropic?.ready ? 'online' : ''}`}
+                className={`status-dot ${caps?.ollama.ready || caps?.openai.ready || caps?.anthropic?.ready || caps?.gemini?.ready ? 'online' : ''}`}
               />
               <span>接続設定</span>
               <SlidersHorizontal size={15} />
@@ -419,6 +420,23 @@ function App() {
                 <small>
                   モデル: {caps?.anthropic?.model || defaultAnthropicModel}
                   。ANTHROPIC_MODELで変更できます。設定後はサーバーを再起動してください。API利用料はご自身のアカウントに発生します。
+                </small>
+              </div>
+              <div>
+                <strong>
+                  <span className={`status-dot ${caps?.gemini?.ready ? 'online' : ''}`} />
+                  Google（Gemini）
+                </strong>
+                <p>
+                  {caps?.gemini?.ready
+                    ? 'APIキー設定済み（接続・利用権限は未検証）'
+                    : 'サーバーの .env にAPIキーを設定'}
+                </p>
+                <code>GEMINI_API_KEY=…</code>
+                <small>
+                  モデル: {caps?.gemini?.model || defaultGeminiModel}
+                  。GEMINI_MODELで変更できます。設定後はサーバーを再起動してください。利用枠・料金はご自身のGoogle
+                  APIプロジェクトに従います。
                 </small>
               </div>
               <div>
@@ -550,6 +568,7 @@ function App() {
                     { id: 'ollama', label: 'Ollama', hint: 'ローカルAI' },
                     { id: 'openai', label: 'OpenAI', hint: '外部API' },
                     { id: 'anthropic', label: 'Claude', hint: 'Anthropic API' },
+                    { id: 'gemini', label: 'Gemini', hint: 'Google API' },
                   ] as const
                 ).map((item) => (
                   <label key={item.id} className={mode === item.id ? 'active' : ''}>
@@ -603,7 +622,8 @@ function App() {
                         onChange={(event) => setConsent(event.target.checked)}
                       />
                       <span>
-                        画像と補足を{providerName}に送信することに同意する（API利用料がかかります）
+                        画像と補足を{providerName}
+                        に送信することに同意する（API利用料がかかる場合があります）
                       </span>
                     </label>
                   )}

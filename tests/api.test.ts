@@ -16,6 +16,8 @@ const config: Config = {
   openaiModel: 'test-vision',
   anthropicKey: 'test-anthropic-key-not-real',
   anthropicModel: 'test-claude-vision',
+  geminiKey: 'test-gemini-key-not-real',
+  geminiModel: 'test-gemini-vision',
   voicevoxUrl: 'http://127.0.0.1:50021',
 };
 const mockFetch = vi.fn<typeof fetch>();
@@ -65,6 +67,8 @@ describe('local API boundaries', () => {
     expect(body.ollama.ready).toBe(true);
     expect(body.openai.ready).toBe(true);
     expect(body.anthropic).toEqual({ ready: true, model: config.anthropicModel });
+    expect(body.gemini).toEqual({ ready: true, model: config.geminiModel });
+    expect(JSON.stringify(body)).not.toContain(config.geminiKey);
     expect(JSON.stringify(body)).not.toContain(config.anthropicKey);
     expect(JSON.stringify(body)).not.toContain(config.openaiKey);
     expect(response.headers.get('cache-control')).toBe('no-store');
@@ -232,7 +236,7 @@ describe('speaker resolution and synthesis parameters', () => {
 describe('provider failures and image metadata', () => {
   it('reports malformed provider envelopes as upstream failures', async () => {
     mockFetch.mockImplementation(async () => json({ unexpected: true }));
-    for (const provider of ['ollama', 'openai', 'anthropic']) {
+    for (const provider of ['ollama', 'openai', 'anthropic', 'gemini']) {
       const response = await post('/api/analyze', { provider, image, consent: true });
       expect(response.status).toBe(502);
     }
@@ -387,5 +391,120 @@ describe('Anthropic Claude vision (mocked, no paid requests)', () => {
     expect(body).toContain('401');
     expect(body).not.toContain('private-provider-error');
     expect(body).not.toContain(config.anthropicKey);
+  });
+});
+
+describe('Google Gemini vision (mocked, no paid requests)', () => {
+  const answer = (value: unknown = analysis, finishReason = 'STOP') => ({
+    candidates: [
+      {
+        finishReason,
+        content: {
+          parts: [
+            { thought: true, text: 'private thinking must not be parsed as output' },
+            { text: JSON.stringify(value) },
+          ],
+        },
+      },
+    ],
+  });
+  it('requires consent before contacting Google', async () => {
+    const response = await post('/api/analyze', { provider: 'gemini', image, consent: false });
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toContain('Gemini');
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+  it('rejects missing Gemini keys without external requests', async () => {
+    await expect(
+      analyzeImage(
+        { ...config, geminiKey: '' },
+        { provider: 'gemini', image, direction: '', consent: true },
+        mockFetch,
+      ),
+    ).rejects.toMatchObject({ status: 503, message: expect.stringContaining('GEMINI_API_KEY') });
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+  it('reports missing keys without making a Google API call', async () => {
+    mockFetch.mockImplementation(async (url) =>
+      String(url).endsWith('/api/show') ? json({ capabilities: ['vision'] }) : json([]),
+    );
+    const result = await capabilities({ ...config, geminiKey: '' }, mockFetch);
+    expect(result.gemini).toEqual({ ready: false, model: config.geminiModel });
+    expect(mockFetch.mock.calls.every(([url]) => !String(url).includes('googleapis.com'))).toBe(
+      true,
+    );
+  });
+  it('sends sanitized JPEG and structured output settings with a header-only API key', async () => {
+    mockFetch.mockResolvedValue(json(answer()));
+    const response = await post('/api/analyze', {
+      provider: 'gemini',
+      image,
+      direction: '穏やかな案内役',
+      consent: true,
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ analysis, provider: 'gemini' });
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe(
+      `https://generativelanguage.googleapis.com/v1beta/models/${config.geminiModel}:generateContent`,
+    );
+    expect(String(url)).not.toContain(config.geminiKey);
+    expect(new URL(String(url)).search).toBe('');
+    expect(init?.headers).toMatchObject({ 'x-goog-api-key': config.geminiKey });
+    expect(init?.redirect).toBe('error');
+    const sent = JSON.parse(String(init?.body));
+    expect(sent.store).toBe(false);
+    expect(sent.contents[0].parts[0].inlineData.mimeType).toBe('image/jpeg');
+    expect(
+      (await sharp(Buffer.from(sent.contents[0].parts[0].inlineData.data, 'base64')).metadata())
+        .format,
+    ).toBe('jpeg');
+    expect(sent.contents[0].parts[1].text).toContain('穏やかな案内役');
+    expect(sent.systemInstruction.parts[0].text).toContain('音声キャスティング');
+    expect(sent.generationConfig.responseFormat.text.mimeType).toBe('APPLICATION_JSON');
+    const schema = sent.generationConfig.responseFormat.text.schema;
+    expect(schema.properties.profile.properties.pitch).toMatchObject({ minimum: 0, maximum: 100 });
+    expect(schema.properties.cues.maxItems).toBe(5);
+    expect(schema.properties.summary.description).toContain('maxLength: 500');
+    expect(schema.properties.summary.maxLength).toBeUndefined();
+    expect(schema.$schema).toBeUndefined();
+    expect(JSON.stringify(sent)).not.toContain(config.geminiKey);
+  });
+  it.each(['MAX_TOKENS', 'SAFETY', 'RECITATION'])(
+    'rejects incomplete or blocked candidates: %s',
+    async (reason) => {
+      mockFetch.mockResolvedValue(json(answer(analysis, reason)));
+      const response = await post('/api/analyze', { provider: 'gemini', image, consent: true });
+      expect(response.status).toBe(502);
+      expect((await response.json()).analysis).toBeUndefined();
+    },
+  );
+  it('reports prompt blocking even when candidates are absent', async () => {
+    mockFetch.mockResolvedValue(json({ promptFeedback: { blockReason: 'SAFETY' } }));
+    const response = await post('/api/analyze', { provider: 'gemini', image, consent: true });
+    expect(response.status).toBe(502);
+    expect((await response.json()).error).toContain('応答できません');
+  });
+  it('validates returned JSON values and handles empty or malformed candidates', async () => {
+    for (const payload of [
+      answer({ ...analysis, profile: { ...neutralProfile, pitch: 101 } }),
+      answer({ ...analysis, summary: '' }),
+      { candidates: [] },
+      { candidates: [{ finishReason: 'STOP', content: { parts: [{ text: '{broken' }] } }] },
+    ]) {
+      mockFetch.mockResolvedValueOnce(json(payload));
+      expect(
+        (await post('/api/analyze', { provider: 'gemini', image, consent: true })).status,
+      ).toBe(502);
+    }
+  });
+  it.each([400, 401, 403, 429])('masks raw provider errors for HTTP %s', async (status) => {
+    mockFetch.mockResolvedValue(json({ error: { message: 'private-google-detail' } }, status));
+    const response = await post('/api/analyze', { provider: 'gemini', image, consent: true });
+    expect(response.status).toBe(502);
+    const body = await response.text();
+    expect(body).toContain(String(status));
+    expect(body).not.toContain('private-google-detail');
+    expect(body).not.toContain(config.geminiKey);
   });
 });

@@ -21,6 +21,9 @@
 | Anthropic       | https://platform.claude.com/docs/en/build-with-claude/vision                                  | Claude Messages APIの画像入力                      |
 | Anthropic       | https://platform.claude.com/docs/en/build-with-claude/structured-outputs                      | 構造化出力、スキーマの制約と応答検証               |
 | Anthropic       | https://platform.claude.com/docs/en/models/overview                                           | 画像対応モデルとAPIモデルID                        |
+| Google Gemini   | https://ai.google.dev/api/generate-content                                                    | 画像入力、JSON出力形式、完了・ブロック判定         |
+| Google Gemini   | https://ai.google.dev/gemini-api/docs/structured-output                                       | JSONスキーマ対応とアプリ側の応答検証               |
+| Google Gemini   | https://ai.google.dev/gemini-api/docs/models                                                  | モデルIDと機能                                     |
 
 数値の提案はVOICEVOXに限り、アプリ側の安全な調整範囲を使用します。API上の全許容範囲や、メーカー推奨の設定値という意味ではありません。
 

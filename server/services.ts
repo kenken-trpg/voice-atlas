@@ -104,6 +104,7 @@ export async function capabilities(
     },
     openai: { ready: Boolean(config.openaiKey), model: config.openaiModel },
     anthropic: { ready: Boolean(config.anthropicKey), model: config.anthropicModel },
+    gemini: { ready: Boolean(config.geminiKey), model: config.geminiModel },
     voicevox: {
       ready: voicevox.status === 'fulfilled',
       detail:
@@ -156,6 +157,8 @@ export async function analyzeImage(
     throw new AppError(503, 'サーバーの.envにOPENAI_API_KEYを設定してください。');
   if (input.provider === 'anthropic' && !config.anthropicKey)
     throw new AppError(503, 'サーバーの.envにANTHROPIC_API_KEYを設定してください。');
+  if (input.provider === 'gemini' && !config.geminiKey)
+    throw new AppError(503, 'サーバーの.envにGEMINI_API_KEYを設定してください。');
   if (input.provider === 'ollama' && /cloud/i.test(config.ollamaModel))
     throw new AppError(400, 'ローカル解析にはダウンロード済みのローカルモデルを指定してください。');
   const image = await sanitizeImage(input.image);
@@ -270,6 +273,90 @@ export async function analyzeImage(
     raw = result.data.content
       .filter((item) => item.type === 'text')
       .map((item) => item.text || '')
+      .join('');
+  } else if (input.provider === 'gemini') {
+    // Gemini accepts numeric/array bounds, but not string-length constraints.
+    // Keep those as hints and enforce the original schema on the response.
+    const geminiSchema = z.toJSONSchema(analysisSchema, {
+      override: ({ jsonSchema }) => {
+        const node = jsonSchema as Record<string, unknown>;
+        const hints: string[] = [];
+        for (const key of ['minLength', 'maxLength']) {
+          if (key in node) {
+            hints.push(`${key}: ${node[key]}`);
+            delete node[key];
+          }
+        }
+        if (hints.length)
+          node.description = [node.description, ...hints].filter(Boolean).join('; ');
+      },
+    });
+    delete geminiSchema.$schema;
+    const response = await remoteJson(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(config.geminiModel)}:generateContent`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.geminiKey },
+        body: JSON.stringify({
+          store: false,
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+          contents: [
+            {
+              role: 'user',
+              parts: [{ inlineData: { mimeType: 'image/jpeg', data: image } }, { text: content }],
+            },
+          ],
+          generationConfig: {
+            maxOutputTokens: 4096,
+            responseFormat: { text: { mimeType: 'APPLICATION_JSON', schema: geminiSchema } },
+          },
+        }),
+      },
+      90_000,
+      fetcher,
+    );
+    const result = z
+      .object({
+        promptFeedback: z.object({ blockReason: z.string().optional() }).optional(),
+        candidates: z
+          .array(
+            z.object({
+              finishReason: z.string(),
+              content: z
+                .object({
+                  parts: z.array(
+                    z.object({ text: z.string().optional(), thought: z.boolean().optional() }),
+                  ),
+                })
+                .optional(),
+            }),
+          )
+          .optional(),
+      })
+      .safeParse(response);
+    if (!result.success)
+      throw new AppError(
+        502,
+        'Geminiから解析結果を取得できませんでした。モデルを確認してください。',
+      );
+    const blockReason = result.data.promptFeedback?.blockReason;
+    const candidate = result.data.candidates?.[0];
+    if (
+      (blockReason && blockReason !== 'BLOCK_REASON_UNSPECIFIED') ||
+      candidate?.finishReason === 'SAFETY'
+    )
+      throw new AppError(
+        502,
+        'Geminiはこの画像の解析に応答できませんでした。別の画像や補足で再試行してください。',
+      );
+    if (result.data.candidates?.length !== 1 || candidate?.finishReason !== 'STOP')
+      throw new AppError(
+        502,
+        'Geminiの画像解析が完了しませんでした。出力上限やモデルを確認して再試行してください。',
+      );
+    raw = (candidate.content?.parts || [])
+      .filter((part) => !part.thought)
+      .map((part) => part.text || '')
       .join('');
   } else {
     const response = await remoteJson(

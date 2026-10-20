@@ -28,7 +28,7 @@
 | `POST /api/analyze`     | `{provider, image, direction, consent}` → 構造化した演出案 |
 | `POST /api/preview`     | `{voiceId, text, recipe}` → WAV                            |
 
-画像はData URLで受け、サーバーで最大8MB・25メガピクセルまで検証。向き補正・最大1536辺へ縮小・JPEG化を行い、OllamaとAnthropic Claudeにはbase64、OpenAIにはJPEG Data URLとして送信する。ファイル・DB保存は行わない。
+画像はData URLで受け、サーバーで最大8MB・25メガピクセルまで検証。向き補正・最大1536辺へ縮小・JPEG化を行い、Ollama・Anthropic Claude・Geminiにはbase64、OpenAIにはJPEG Data URLとして送信する。ファイル・DB保存は行わない。
 
 重い解析・音声合成はサーバーごとに同時1件とし、タイムアウトを設ける。別タブなどから競合した場合はHTTP 429で返す。サーバー側の処理はブラウザーの中止だけでは取り消せない。
 
@@ -37,6 +37,12 @@
 `ANTHROPIC_API_KEY`・`ANTHROPIC_MODEL` をサーバー側で読み、`provider: "anthropic"` を `POST /api/analyze` で受け付ける。キーはブラウザーへ返さない。外部AIへの送信同意はOpenAI・Claudeの切替時にリセットし、APIでも同意を必須とする。
 
 Messages APIの `output_config.format` には対応範囲のJSONスキーマを渡し、数値・文字数などの制約は説明へ移す。応答は元のZodスキーマで再検証する。拒否・出力上限・不正応答では提案を作らずエラーを返す。
+
+## Gemini接続
+
+`GEMINI_API_KEY`・`GEMINI_MODEL` をサーバー側で読み、`provider: "gemini"` を受け付ける。Googleへの送信同意をAPIでも必須とし、`x-goog-api-key` ヘッダーで認証する。キーはURLに含めない。
+
+`generateContent` へ `inlineData` のJPEGと補足を送り、`generationConfig.responseFormat` でJSON出力を指定する。送信用スキーマでは文字数制約を説明へ移し、応答は元のZodスキーマで検証する。完了した一つの候補のテキストだけを読み、思考ブロックは除外する。ブロック・未完了・不正応答はエラーにする。
 
 ## 公開開発
 
