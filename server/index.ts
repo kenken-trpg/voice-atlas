@@ -10,7 +10,8 @@ const production = process.argv.includes('--production');
 let closeVite: (() => Promise<void>) | undefined;
 if (production) {
   const dist = fileURLToPath(new URL('../dist', import.meta.url));
-  if (!existsSync(resolve(dist, 'index.html'))) throw new Error('先に npm run build を実行してください。');
+  if (!existsSync(resolve(dist, 'index.html')))
+    throw new Error('先に npm run build を実行してください。');
   app.use(express.static(dist));
 } else {
   const { createServer } = await import('vite');
@@ -21,7 +22,11 @@ if (production) {
 const server = app.listen(config.port, '127.0.0.1', () => {
   console.log(`Voice Atlas: http://127.0.0.1:${config.port}`);
 });
-for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => {
-  server.close(() => { void closeVite?.().then(() => process.exit(0)); if (!closeVite) process.exit(0); });
-  server.closeAllConnections();
-});
+for (const signal of ['SIGINT', 'SIGTERM'] as const)
+  process.once(signal, () => {
+    server.close(() => {
+      void closeVite?.().then(() => process.exit(0));
+      if (!closeVite) process.exit(0);
+    });
+    server.closeAllConnections();
+  });

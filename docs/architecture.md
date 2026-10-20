@@ -19,14 +19,14 @@
 
 ## 入出力
 
-| API | 内容 |
-| --- | --- |
-| `GET /api/health` | アプリの死活確認 |
-| `GET /api/catalog` | 話者カタログと確認日 |
-| `GET /api/capabilities` | ローカルサービス・APIキー設定の状態 |
-| `POST /api/recommend` | `{profile, preferences}` → カタログ候補 |
-| `POST /api/analyze` | `{provider, image, direction, consent}` → 構造化した演出案 |
-| `POST /api/preview` | `{voiceId, text, recipe}` → WAV |
+| API                     | 内容                                                       |
+| ----------------------- | ---------------------------------------------------------- |
+| `GET /api/health`       | アプリの死活確認                                           |
+| `GET /api/catalog`      | 話者カタログと確認日                                       |
+| `GET /api/capabilities` | ローカルサービス・APIキー設定の状態                        |
+| `POST /api/recommend`   | `{profile, preferences}` → カタログ候補                    |
+| `POST /api/analyze`     | `{provider, image, direction, consent}` → 構造化した演出案 |
+| `POST /api/preview`     | `{voiceId, text, recipe}` → WAV                            |
 
 画像はData URLで受け、サーバーで最大8MB・25メガピクセルまで検証。向き補正・最大1536辺へ縮小・JPEG化を行い、Ollamaにはbase64、OpenAIにはJPEG Data URLとして送信する。ファイル・DB保存は行わない。
 
