@@ -6,6 +6,8 @@
 
 ![Voice Atlasの話者比較と調声レシピ画面](docs/screenshots/workbench.png)
 
+詳しい操作方法は[操作マニュアル](docs/manual.md)を参照してください。
+
 ## できること
 
 - PNG・JPEG・WebPの画像を読み込み（8MB、25メガピクセル以下）
@@ -13,6 +15,7 @@
 - AIを使わず、声の高さ・活発さ・柔らかさ・息の多さを手動指定
 - 公式情報を参照した3ソフト・10話者のカタログから候補を比較
 - ソフト・無料ソフトで絞り込み
+- キーボード・タッチ操作に対応した、4軸と調声値のツールチップヘルプ
 - **VOICEVOX**の話速・音高・抑揚・音量・開始無音・終了無音を提案・調整
 - 接続中のVOICEVOXから話者とスタイルを照合し、設定を反映して試聴・WAV保存
 - **COEIROINK・A.I.VOICE2**の公式情報付き手動調整ガイド
@@ -109,9 +112,8 @@ COEIROINK・A.I.VOICE2の自動試聴と数値出力は初期版の対象外で�
 ## 開発と検証
 
 ```sh
-npm run typecheck
-npm test
-npm run build
+npm run format:check
+npm run check
 npx playwright install chromium
 npm run test:e2e
 ```
@@ -149,7 +151,7 @@ docs/                設計、出典、開発方針
 
 検証範囲と実機評価の状況は[初期版の検証記録](docs/verification.md)に記載しています。
 
-詳しくは[設計](docs/architecture.md)、[カタログの出典](docs/catalog-sources.md)、[開発への参加](CONTRIBUTING.md)を参照してください。
+詳しくは[操作マニュアル](docs/manual.md)、[設計](docs/architecture.md)、[カタログの出典](docs/catalog-sources.md)、[開発への参加](CONTRIBUTING.md)を参照してください。
 
 ## ライセンス
 

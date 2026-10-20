@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Server } from 'node:http';
+import { request, type Server } from 'node:http';
+import { gzipSync } from 'node:zlib';
 import sharp from 'sharp';
 import { createApp } from '../server/app';
 import type { Config } from '../server/config';
@@ -72,12 +73,69 @@ describe('local API boundaries', () => {
     expect(JSON.stringify(body)).not.toContain(config.anthropicKey);
     expect(JSON.stringify(body)).not.toContain(config.openaiKey);
     expect(response.headers.get('cache-control')).toBe('no-store');
+    expect((await fetch(base + '/API/health')).headers.get('cache-control')).toBe('no-store');
+    expect((await fetch(base + '/API/analyze', { method: 'POST', body: '{}' })).status).toBe(415);
   });
   it('handles absent services without claiming successful analysis', async () => {
     mockFetch.mockRejectedValue(new Error('offline'));
     const body = await (await fetch(base + '/api/capabilities')).json();
     expect(body.ollama.ready).toBe(false);
     expect(body.voicevox.ready).toBe(false);
+  });
+  it('protects document routes as well as API routes', async () => {
+    for (const path of ['/', '/assets/test.js', '/api/health']) {
+      const status = await new Promise<number | undefined>((resolve, reject) => {
+        const req = request(base + path, { headers: { Host: 'attacker.example' } }, (response) => {
+          response.resume();
+          resolve(response.statusCode);
+        });
+        req.on('error', reject);
+        req.end();
+      });
+      expect(status).toBe(403);
+      expect(
+        (await fetch(base + path, { headers: { 'Sec-Fetch-Site': 'cross-site' } })).status,
+      ).toBe(403);
+    }
+    const response = await fetch(base + '/api/health');
+    expect(response.headers.get('x-frame-options')).toBe('DENY');
+    expect(response.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");
+  });
+  it('rejects large non-image bodies and compressed input before service calls', async () => {
+    for (const path of ['/api/recommend', '/api/preview']) {
+      const response = await post(path, { text: 'x'.repeat(17 * 1024) });
+      expect(response.status).toBe(413);
+    }
+    const compressed = await fetch(base + '/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' },
+      body: gzipSync('{}'),
+    });
+    expect(compressed.status).toBe(415);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+  it('shares pending capability checks and refreshes after completion', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mockFetch.mockImplementation(async (url) => {
+      await gate;
+      return String(url).endsWith('/api/show') ? json({ capabilities: ['vision'] }) : json([]);
+    });
+    const first = fetch(base + '/api/capabilities');
+    const second = fetch(base + '/api/capabilities');
+    await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2));
+    // A health response confirms both queued capability requests reached the server.
+    await fetch(base + '/api/health');
+    release();
+    const responses = await Promise.all([first, second]);
+    expect(await responses[0].json()).toEqual(await responses[1].json());
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    mockFetch.mockRejectedValue(new Error('offline'));
+    const refreshed = await (await fetch(base + '/api/capabilities')).json();
+    expect(refreshed.ollama.ready).toBe(false);
+    expect(mockFetch).toHaveBeenCalledTimes(4);
   });
   it('rejects requests from other websites before calling services', async () => {
     expect((await post('/api/analyze', {}, { Origin: 'https://untrusted.example' })).status).toBe(
@@ -180,6 +238,19 @@ describe('vision provider contracts (mocked, no paid requests)', () => {
     const response = await post('/api/analyze', { provider: 'ollama', image });
     expect(response.status).toBe(502);
     expect((await response.json()).error).toContain('形式');
+  });
+  it('releases the exclusive slot after an oversized upstream response', async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response('', {
+        headers: { 'Content-Length': String(2 * 1024 * 1024 + 1) },
+      }),
+    );
+    const failed = await post('/api/analyze', { provider: 'ollama', image });
+    expect(failed.status).toBe(502);
+    expect((await failed.json()).error).toContain('サイズ上限');
+    mockFetch.mockResolvedValueOnce(json({ message: { content: JSON.stringify(analysis) } }));
+    const recovered = await post('/api/analyze', { provider: 'ollama', image });
+    expect(recovered.status).toBe(200);
   });
   it('reports provider errors without exposing raw provider responses', async () => {
     mockFetch.mockResolvedValue(json({ error: 'private-provider-detail' }, 401));

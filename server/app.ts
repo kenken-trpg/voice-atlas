@@ -1,7 +1,7 @@
 import express, { type ErrorRequestHandler } from 'express';
 import { z } from 'zod';
 import { voices, catalogReviewedAt } from '../shared/catalog';
-import { preferencesSchema, profileSchema, recipeSchema, providerSchema } from '../shared/schema';
+import { analyzeRequestSchema, previewRequestSchema, recommendRequestSchema } from './validation';
 import { recommend } from '../shared/recommend';
 import type { Config } from './config';
 import { analyzeImage, AppError, capabilities, synthesize, type Fetcher } from './services';
@@ -13,8 +13,11 @@ export function createApp(config: Config, fetcher: Fetcher = fetch) {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
-    if (!req.path.startsWith('/api/')) return next();
-    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader(
+      'Content-Security-Policy',
+      "frame-ancestors 'none'; object-src 'none'; base-uri 'self'",
+    );
     // Local app: reject DNS rebinding and browser requests from other sites.
     const host = req.headers.host;
     if (!host || !/^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/.test(host)) {
@@ -26,11 +29,14 @@ export function createApp(config: Config, fetcher: Fetcher = fetch) {
     ) {
       return res.status(403).json({ error: '同じアプリ画面から実行してください。' });
     }
+    if (!/^\/api(?:\/|$)/i.test(req.path)) return next();
+    res.setHeader('Cache-Control', 'no-store');
     if (req.method === 'POST' && !req.is('application/json'))
       return res.status(415).json({ error: 'application/jsonで送信してください。' });
     next();
   });
-  app.use('/api', express.json({ limit: '12mb' }));
+  app.use('/api/analyze', express.json({ limit: '12mb', inflate: false }));
+  app.use('/api', express.json({ limit: '16kb', inflate: false }));
   let busy = false;
   const runExclusive = async <T>(work: () => Promise<T>) => {
     if (busy) throw new AppError(429, '処理中です。完了後にもう一度お試しください。');
@@ -43,33 +49,25 @@ export function createApp(config: Config, fetcher: Fetcher = fetch) {
   };
   app.get('/api/health', (_req, res) => res.json({ ok: true, version: '0.1.0' }));
   app.get('/api/catalog', (_req, res) => res.json({ voices, reviewedAt: catalogReviewedAt }));
-  app.get('/api/capabilities', async (_req, res) => res.json(await capabilities(config, fetcher)));
+  // Share only pending checks: an explicit refresh always gets fresh service state.
+  let pendingCapabilities: ReturnType<typeof capabilities> | undefined;
+  app.get('/api/capabilities', async (_req, res) => {
+    pendingCapabilities ??= capabilities(config, fetcher).finally(() => {
+      pendingCapabilities = undefined;
+    });
+    res.json(await pendingCapabilities);
+  });
   app.post('/api/recommend', (req, res) => {
-    const input = z
-      .object({ profile: profileSchema, preferences: preferencesSchema })
-      .parse(req.body);
+    const input = recommendRequestSchema.parse(req.body);
     res.json({ recommendations: recommend(input.profile, input.preferences) });
   });
   app.post('/api/analyze', async (req, res) => {
-    const input = z
-      .object({
-        provider: providerSchema,
-        image: z.string().max(11_200_000),
-        direction: z.string().max(1000).default(''),
-        consent: z.boolean().default(false),
-      })
-      .parse(req.body);
+    const input = analyzeRequestSchema.parse(req.body);
     const analysis = await runExclusive(() => analyzeImage(config, input, fetcher));
     res.json({ analysis, provider: input.provider });
   });
   app.post('/api/preview', async (req, res) => {
-    const input = z
-      .object({
-        voiceId: z.string().max(80),
-        text: z.string().trim().min(1).max(300),
-        recipe: recipeSchema,
-      })
-      .parse(req.body);
+    const input = previewRequestSchema.parse(req.body);
     const voice = voices.find((item) => item.id === input.voiceId);
     if (!voice) throw new AppError(404, '話者が見つかりません。');
     const wav = await runExclusive(() =>
@@ -92,7 +90,13 @@ export function createApp(config: Config, fetcher: Fetcher = fetch) {
       return;
     }
     if ((error as { type?: string })?.type === 'entity.too.large') {
-      res.status(413).json({ error: '画像は8MB以下にしてください。' });
+      res
+        .status(413)
+        .json({ error: '送信データが上限を超えました。画像は8MB以下にしてください。' });
+      return;
+    }
+    if ((error as { type?: string })?.type === 'encoding.unsupported') {
+      res.status(415).json({ error: '圧縮せずにJSONを送信してください。' });
       return;
     }
     // Never log image bodies, provider responses or secrets.

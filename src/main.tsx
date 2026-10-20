@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   ArrowDownToLine,
@@ -26,7 +26,6 @@ import {
   defaultAnthropicModel,
   defaultGeminiModel,
   type Provider,
-  recipeFields,
   type Analysis,
   type Capabilities,
   type Engine,
@@ -37,6 +36,10 @@ import {
 } from '../shared/schema';
 import { catalogReviewedAt, voices } from '../shared/catalog';
 import { recommend } from '../shared/recommend';
+import { HelpTip } from './components/HelpTip';
+import { VoiceMark } from './components/VoiceMark';
+import { RecipeControls } from './components/RecipeControls';
+import { jsonRequest, download } from './lib/http';
 import './styles.css';
 
 type Mode = 'manual' | Provider;
@@ -64,40 +67,13 @@ const ends: Record<(typeof axes)[number], [string, string]> = {
   warmth: ['シャープ', '柔らかい'],
   airiness: ['張りのある', '息を含む'],
 };
-async function jsonRequest<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(path, {
-    method: body === undefined ? 'GET' : 'POST',
-    headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-    signal,
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || '処理に失敗しました。もう一度お試しください。');
-  return data as T;
-}
-function download(name: string, content: string, type = 'application/json') {
-  const url = URL.createObjectURL(new Blob([content], { type }));
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = name;
-  anchor.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-function VoiceMark({ color, small = false }: { color: string; small?: boolean }) {
-  return (
-    <span
-      className={`voice-mark ${small ? 'small' : ''}`}
-      style={{ '--voice-color': color } as React.CSSProperties}
-      aria-hidden="true"
-    >
-      <i />
-      <i />
-      <i />
-      <i />
-      <i />
-    </span>
-  );
-}
+const axisHelp: Record<(typeof axes)[number], string> = {
+  pitch:
+    '低めから高めまで、希望する声の方向を指定します。調声レシピの「音高」とは別に、候補の順位に影響します。',
+  energy: '静かな語りから活発な演技まで、希望する勢いを指定します。',
+  warmth: 'シャープな響きから柔らかい響きまで、創作上の印象を指定します。',
+  airiness: '張りのある声から息を含んだ声までを指定します。ささやきスタイルの候補にも影響します。',
+};
 function App() {
   const [image, setImage] = useState<ImageData | null>(null);
   const [mode, setMode] = useState<Mode>('manual');
@@ -641,13 +617,15 @@ function App() {
               <div className="profile-sliders">
                 {axes.map((axis) => (
                   <div className="profile-control" key={axis}>
-                    <label htmlFor={`profile-${axis}`}>
-                      {axisLabels[axis]}
-                      <output>{Math.round(profile[axis])}</output>
-                    </label>
+                    <div className="control-heading">
+                      <label htmlFor={`profile-${axis}`}>{axisLabels[axis]}</label>
+                      <HelpTip label={axisLabels[axis]}>{axisHelp[axis]}</HelpTip>
+                      <output htmlFor={`profile-${axis}`}>{Math.round(profile[axis])}</output>
+                    </div>
                     <input
                       id={`profile-${axis}`}
                       type="range"
+                      aria-description={axisHelp[axis]}
                       min={0}
                       max={100}
                       value={profile[axis]}
@@ -915,6 +893,11 @@ function App() {
                               <SlidersHorizontal size={15} />
                               {recipe ? '調声レシピ' : '調声ガイド'}
                             </h4>
+                            <HelpTip label={recipe ? '調声レシピ' : '調声ガイド'}>
+                              {recipe
+                                ? '調整値は選択中の話者の試聴に使います。「提案値に戻す」で初期提案へ戻せます。JSON保存はVoice Atlasの記録形式です。'
+                                : '設定手順を参考に、選んだソフトで調整してください。このソフトの数値設定とアプリ内試聴には対応していません。'}
+                            </HelpTip>
                             {recipe && (
                               <button
                                 className="text-button"
@@ -934,37 +917,16 @@ function App() {
                               : 'このソフトは手動調整の方向を提案します。数値設定とアプリ内試聴は未対応です。'}
                           </p>
                           {recipe && (
-                            <div className="recipe-sliders">
-                              {recipeFields.map((field) => (
-                                <div className="recipe-control" key={field.key}>
-                                  <label htmlFor={`recipe-${field.key}`} title={field.help}>
-                                    {field.label}
-                                    <output>
-                                      {recipe[field.key].toFixed(2)}
-                                      <small>{field.unit}</small>
-                                    </output>
-                                  </label>
-                                  <input
-                                    id={`recipe-${field.key}`}
-                                    type="range"
-                                    min={field.min}
-                                    max={field.max}
-                                    step={field.step}
-                                    value={recipe[field.key]}
-                                    disabled={disabled}
-                                    aria-description={field.help}
-                                    onChange={(event) => {
-                                      setRecipe((current) =>
-                                        current
-                                          ? { ...current, [field.key]: Number(event.target.value) }
-                                          : null,
-                                      );
-                                      setEdited(true);
-                                    }}
-                                  />
-                                </div>
-                              ))}
-                            </div>
+                            <RecipeControls
+                              recipe={recipe}
+                              disabled={disabled}
+                              onChange={(key, value) => {
+                                setRecipe((current) =>
+                                  current ? { ...current, [key]: value } : null,
+                                );
+                                setEdited(true);
+                              }}
+                            />
                           )}
                           <details className="guide-details" open={!recipe}>
                             <summary>

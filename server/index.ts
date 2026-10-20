@@ -12,7 +12,26 @@ if (production) {
   const dist = fileURLToPath(new URL('../dist', import.meta.url));
   if (!existsSync(resolve(dist, 'index.html')))
     throw new Error('先に npm run build を実行してください。');
-  app.use(express.static(dist));
+  app.use((_req, res, next) => {
+    res.setHeader(
+      'Content-Security-Policy',
+      [
+        "default-src 'self'",
+        "script-src 'self'",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data: blob:",
+        "media-src 'self' blob:",
+        "connect-src 'self'",
+        "frame-ancestors 'none'",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+      ].join('; '),
+    );
+    next();
+  });
+  app.use('/assets', express.static(resolve(dist, 'assets'), { immutable: true, maxAge: '1y' }));
+  app.use(express.static(dist, { maxAge: 0 }));
 } else {
   const { createServer } = await import('vite');
   const vite = await createServer({ server: { middlewareMode: true }, appType: 'spa' });
@@ -22,6 +41,8 @@ if (production) {
 const server = app.listen(config.port, '127.0.0.1', () => {
   console.log(`Voice Atlas: http://127.0.0.1:${config.port}`);
 });
+server.requestTimeout = 30_000;
+server.headersTimeout = 10_000;
 for (const signal of ['SIGINT', 'SIGTERM'] as const)
   process.once(signal, () => {
     server.close(() => {

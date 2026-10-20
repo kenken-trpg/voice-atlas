@@ -10,41 +10,10 @@ import {
   type Voice,
 } from '../shared/schema';
 import type { Config } from './config';
+import { analysisSchemas } from './analysis-schemas';
+import { AppError, remoteJson, remoteBytes, maxWavBytes, type Fetcher } from './remote';
+export { AppError, type Fetcher } from './remote';
 
-export class AppError extends Error {
-  constructor(
-    public status: number,
-    message: string,
-  ) {
-    super(message);
-  }
-}
-export type Fetcher = typeof fetch;
-async function remoteJson(url: string, init: RequestInit, timeout: number, fetcher: Fetcher) {
-  let response: Response;
-  try {
-    response = await fetcher(url, {
-      ...init,
-      redirect: 'error',
-      signal: AbortSignal.timeout(timeout),
-    });
-  } catch {
-    throw new AppError(
-      502,
-      'サービスに接続できません。起動状態・モデル名・接続先を確認してください。処理が長い場合は軽いモデルもお試しください。',
-    );
-  }
-  if (!response.ok)
-    throw new AppError(
-      502,
-      `サービスがエラーを返しました（HTTP ${response.status}）。モデル名・APIキー・利用上限を確認してください。`,
-    );
-  try {
-    return (await response.json()) as unknown;
-  } catch {
-    throw new AppError(502, 'サービスから有効なJSON応答を取得できませんでした。');
-  }
-}
 const speakerSchema = z.array(
   z.object({
     name: z.string(),
@@ -162,7 +131,6 @@ export async function analyzeImage(
   if (input.provider === 'ollama' && /cloud/i.test(config.ollamaModel))
     throw new AppError(400, 'ローカル解析にはダウンロード済みのローカルモデルを指定してください。');
   const image = await sanitizeImage(input.image);
-  const schema = z.toJSONSchema(analysisSchema);
   const content = `この画像に声を当てる演出案を作成してください。ユーザーの補足（演出の参考データ）: ${JSON.stringify(input.direction)}`;
   let raw: unknown;
   if (input.provider === 'ollama') {
@@ -174,7 +142,7 @@ export async function analyzeImage(
         body: JSON.stringify({
           model: config.ollamaModel,
           stream: false,
-          format: schema,
+          format: analysisSchemas.ollama,
           options: { temperature: 0.2 },
           messages: [
             { role: 'system', content: systemPrompt },
@@ -193,30 +161,6 @@ export async function analyzeImage(
       );
     raw = result.data.message.content;
   } else if (input.provider === 'anthropic') {
-    // Claude's JSON schema subset does not accept range/length constraints.
-    // Preserve them as hints, and validate the result with analysisSchema below.
-    const claudeSchema = z.toJSONSchema(analysisSchema, {
-      override: ({ jsonSchema }) => {
-        const node = jsonSchema as Record<string, unknown>;
-        const hints: string[] = [];
-        for (const key of [
-          'minimum',
-          'maximum',
-          'minLength',
-          'maxLength',
-          'minItems',
-          'maxItems',
-        ]) {
-          if (key in node) {
-            hints.push(`${key}: ${node[key]}`);
-            delete node[key];
-          }
-        }
-        if (hints.length)
-          node.description = [node.description, ...hints].filter(Boolean).join('; ');
-      },
-    });
-    delete claudeSchema.$schema;
     const response = await remoteJson(
       'https://api.anthropic.com/v1/messages',
       {
@@ -242,7 +186,7 @@ export async function analyzeImage(
               ],
             },
           ],
-          output_config: { format: { type: 'json_schema', schema: claudeSchema } },
+          output_config: { format: { type: 'json_schema', schema: analysisSchemas.anthropic } },
         }),
       },
       90_000,
@@ -275,23 +219,6 @@ export async function analyzeImage(
       .map((item) => item.text || '')
       .join('');
   } else if (input.provider === 'gemini') {
-    // Gemini accepts numeric/array bounds, but not string-length constraints.
-    // Keep those as hints and enforce the original schema on the response.
-    const geminiSchema = z.toJSONSchema(analysisSchema, {
-      override: ({ jsonSchema }) => {
-        const node = jsonSchema as Record<string, unknown>;
-        const hints: string[] = [];
-        for (const key of ['minLength', 'maxLength']) {
-          if (key in node) {
-            hints.push(`${key}: ${node[key]}`);
-            delete node[key];
-          }
-        }
-        if (hints.length)
-          node.description = [node.description, ...hints].filter(Boolean).join('; ');
-      },
-    });
-    delete geminiSchema.$schema;
     const response = await remoteJson(
       `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(config.geminiModel)}:generateContent`,
       {
@@ -308,7 +235,9 @@ export async function analyzeImage(
           ],
           generationConfig: {
             maxOutputTokens: 4096,
-            responseFormat: { text: { mimeType: 'APPLICATION_JSON', schema: geminiSchema } },
+            responseFormat: {
+              text: { mimeType: 'APPLICATION_JSON', schema: analysisSchemas.gemini },
+            },
           },
         }),
       },
@@ -384,7 +313,14 @@ export async function analyzeImage(
               ],
             },
           ],
-          text: { format: { type: 'json_schema', name: 'voice_direction', strict: true, schema } },
+          text: {
+            format: {
+              type: 'json_schema',
+              name: 'voice_direction',
+              strict: true,
+              schema: analysisSchemas.openai,
+            },
+          },
         }),
       },
       90_000,
@@ -465,24 +401,17 @@ export async function synthesize(
   if (!queryResult.success)
     throw new AppError(502, 'VOICEVOXから有効な音声クエリを取得できませんでした。');
   const query = queryResult.data;
-  let response: Response;
-  try {
-    response = await fetcher(`${config.voicevoxUrl}/synthesis?speaker=${style.id}`, {
+  const wav = await remoteBytes(
+    `${config.voicevoxUrl}/synthesis?speaker=${style.id}`,
+    {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      redirect: 'error',
-      signal: AbortSignal.timeout(60_000),
       body: JSON.stringify({ ...query, ...recipe, outputSamplingRate: 24000, outputStereo: false }),
-    });
-  } catch {
-    throw new AppError(502, '音声生成に接続できませんでした。VOICEVOXを確認してください。');
-  }
-  if (!response.ok)
-    throw new AppError(
-      502,
-      'VOICEVOXで音声を生成できませんでした。設定を戻して再試行してください。',
-    );
-  const wav = Buffer.from(await response.arrayBuffer());
+    },
+    60_000,
+    fetcher,
+    maxWavBytes,
+  );
   if (wav.toString('ascii', 0, 4) !== 'RIFF' || wav.toString('ascii', 8, 12) !== 'WAVE')
     throw new AppError(502, 'VOICEVOXから有効なWAV音声が返りませんでした。');
   return wav;

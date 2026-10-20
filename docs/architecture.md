@@ -17,6 +17,15 @@
 - 話者IDはインストール済みエンジンの `/speakers` から解決し、`/audio_query` の値を上書きして `/synthesis` に渡す。
 - COEIROINK・A.I.VOICE2にはソフト固有の数値が確認できるまで値を出さず、手動調整の方向と公式手順を示す。
 
+## 実装の境界と性能
+
+- `server/remote.ts`：外部通信のタイムアウト、リダイレクト拒否、応答サイズ上限、エラーの秘匿を共通化。
+- `server/validation.ts`：リクエストスキーマをルート定義から分離。
+- `server/analysis-schemas.ts`：プロバイダー向けスキーマを起動時に一度だけ生成。応答は毎回元のZodスキーマで検証。
+- `src/components/`：調声コントロール、ツールチップ、話者マーク。`src/lib/http.ts`：JSON通信・ダウンロード。
+- 接続確認は同じアプリへの実行中の要求だけを共有し、完了結果はキャッシュしない。再確認時に接続状態を再取得する。
+- 本番のハッシュ付き `/assets` のみ1年間のimmutableキャッシュ。HTMLは再検証し、APIはno-store。
+
 ## 入出力
 
 | API                     | 内容                                                       |
@@ -28,7 +37,7 @@
 | `POST /api/analyze`     | `{provider, image, direction, consent}` → 構造化した演出案 |
 | `POST /api/preview`     | `{voiceId, text, recipe}` → WAV                            |
 
-画像はData URLで受け、サーバーで最大8MB・25メガピクセルまで検証。向き補正・最大1536辺へ縮小・JPEG化を行い、Ollama・Anthropic Claude・Geminiにはbase64、OpenAIにはJPEG Data URLとして送信する。ファイル・DB保存は行わない。
+画像はData URLで受け、サーバーで最大8MB・25メガピクセルまで検証。向き補正・最大1536辺へ縮小・JPEG化を行い、Ollama・Anthropic Claude・Geminiにはbase64、OpenAIにはJPEG Data URLとして送信する。ファイル・DB保存は行わない。解析APIのJSON本文上限は12MiB、その他は16KiBで、入力圧縮は拒否する。外部JSON応答は2MiB、WAVは20MiBまで。本文の受信中もタイムアウトを適用する。
 
 重い解析・音声合成はサーバーごとに同時1件とし、タイムアウトを設ける。別タブなどから競合した場合はHTTP 429で返す。サーバー側の処理はブラウザーの中止だけでは取り消せない。
 
@@ -47,3 +56,13 @@ Messages APIの `output_config.format` には対応範囲のJSONスキーマを�
 ## 公開開発
 
 ソース・設計・カタログ・CIをGitHubで公開。`.env`、画像、生成音声、ログ、ビルド成果物を追跡しない。CIは実APIへの通信をモックして再現性を確保する。公開サーバー向けの認証・課金・保持ポリシーは将来別途設計する。
+
+## CI
+
+`npm run check` はユニット/APIテストと、型検査を含む本番ビルドを実行する。型検査を重複実行しない。単独の `npm run typecheck` も利用可能。
+
+GitHub ActionsはmainへのpushとPull Requestで実行し、同じrefの古い実行はキャンセルする。npmキャッシュを使い、インストール時の監査通信は省く。監査は必要時に `npm audit --audit-level=high` で実行する。整形検査もCIで実施する。
+
+ブラウザーテストはChromiumのデスクトップ・モバイルの2構成を維持し、CIのワーカー数は2。実行に使うheadless shellだけを `npx playwright install --with-deps --only-shell chromium` でインストールする。[Playwright公式のブラウザー設定](https://playwright.dev/docs/browsers)に沿い、不要なフルブラウザーの取得を省く。ブラウザーキャッシュは[公式CIガイド](https://playwright.dev/docs/ci)が推奨していないため追加しない。
+
+実際のGitHubランナーでの所要時間の短縮率は未計測。

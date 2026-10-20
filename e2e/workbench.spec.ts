@@ -103,7 +103,7 @@ for (const { provider, label, display } of [
     await expect(page.getByText('凛とした案内役という演出案です。')).toBeVisible();
     expect(sent).toBe(true);
     await expect(page.locator('.source-badge')).toContainText(`${display}で解析`);
-    await page.getByLabel('声の高さ', { exact: false }).first().fill('55');
+    await page.getByRole('slider', { name: '声の高さ', exact: true }).fill('55');
     await expect(page.locator('.source-badge')).toContainText('調整済み');
     await page.getByRole('radio', { name: label === 'Claude' ? 'OpenAI' : 'Claude' }).check();
     await expect(page.locator('.consent input')).not.toBeChecked();
@@ -217,4 +217,40 @@ test('previews edited settings and invalidates audio after further editing', asy
   await expect(page.getByRole('link', { name: 'WAVを保存' })).toBeVisible();
   await page.locator('#recipe-speedScale').fill('0.92');
   await expect(page.locator('.audio-result')).toHaveCount(0);
+});
+
+test('help works with focus, Escape and touch without viewport overflow', async ({ page }) => {
+  await page.goto('/');
+  const help = page.getByRole('button', { name: '声の高さのヘルプ', exact: true });
+  await help.focus();
+  await expect(page.getByRole('tooltip')).toContainText('候補の順位');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('tooltip')).toHaveCount(0);
+  await help.click();
+  await expect(page.getByRole('tooltip')).toBeVisible();
+  const bounds = await page.getByRole('tooltip').boundingBox();
+  const viewport = page.viewportSize()!;
+  expect(bounds!.x).toBeGreaterThanOrEqual(0);
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width);
+  expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(viewport.height);
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: '凛と、落ち着いて' }).click();
+  await page.getByLabel('ソフトで絞り込む').selectOption('VOICEVOX');
+  const pitchHelp = page.getByRole('button', { name: '音高のヘルプ', exact: true });
+  if (test.info().project.name === 'mobile') await pitchHelp.tap();
+  else await pitchHelp.hover();
+  await expect(page.getByRole('tooltip')).toContainText('0が元の音高');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('tooltip')).toHaveCount(0);
+});
+
+test('production serves a restricted document and immutable bundled assets', async ({ page }) => {
+  const response = await page.goto('/');
+  const headers = response!.headers();
+  expect(headers['x-frame-options']).toBe('DENY');
+  expect(headers['content-security-policy']).toContain("script-src 'self'");
+  const source = await page.locator('script[src]').first().getAttribute('src');
+  const asset = await page.request.get(source!);
+  expect(asset.headers()['cache-control']).toContain('immutable');
+  expect(headers['cache-control']).not.toContain('immutable');
 });

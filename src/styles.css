@@ -499,8 +499,8 @@ textarea::placeholder {
   gap: 17px;
   margin: 20px 0 24px;
 }
-.profile-control > label,
-.recipe-control > label {
+.profile-control .control-heading,
+.recipe-control .control-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1075,7 +1075,7 @@ select {
   gap: 19px 20px;
   margin-top: 20px;
 }
-.recipe-control > label {
+.recipe-control .control-heading > label {
   font-size: 10px;
 }
 .recipe-control output {
@@ -1472,7 +1472,7 @@ footer small {
   .recipe-sliders {
     gap: 15px 12px;
   }
-  .recipe-control > label {
+  .recipe-control .control-heading > label {
     font-size: 9px;
   }
   .recipe-control output {
@@ -1746,7 +1746,7 @@ footer small {
   .recipe-sliders {
     gap: 20px 25px;
   }
-  .recipe-control > label {
+  .recipe-control .control-heading > label {
     font-size: 11px;
   }
   .recipe-control output {
@@ -1839,4 +1839,56 @@ footer small {
     animation-duration: 0.01ms !important;
     transition: none !important;
   }
+}
+
+.control-heading {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+}
+.control-heading output {
+  margin-left: auto;
+}
+.profile-control .control-heading output {
+  color: #69805a;
+  font-size: 12px;
+}
+.help-tip {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.help-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #657c57;
+  border-radius: 4px;
+  cursor: help;
+}
+.help-button:focus-visible {
+  outline: 2px solid #657c57;
+  outline-offset: 2px;
+}
+.help-popover {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  width: min(280px, calc(100vw - 24px));
+  max-height: min(120px, calc(100vh - 24px));
+  overflow: auto;
+  padding: 12px 14px;
+  background: #34462c;
+  color: #fffefa;
+  border: 0;
+  border-radius: 7px;
+  box-shadow: 0 4px 18px #1b2b1830;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.8;
 }
