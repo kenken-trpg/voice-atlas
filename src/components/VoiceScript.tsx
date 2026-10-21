@@ -24,8 +24,9 @@ import { type LibraryAudition } from '../../shared/library-comparison';
 import { download } from '../lib/http';
 import { pauseOtherAudio } from './ComparisonPanel';
 import { AivisModelDetails } from './AivisModelDetails';
+import { ScriptAudioExport } from './ScriptAudioExport';
 
-type Preview = { key: string; url: string; audition: LibraryAudition };
+type Preview = { key: string; url: string; blob: Blob; audition: LibraryAudition };
 export function VoiceScript({
   assignments,
   disabled,
@@ -61,6 +62,7 @@ export function VoiceScript({
   const [opened, setOpened] = useState(false);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [generatingId, setGeneratingId] = useState<string | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [previews, setPreviews] = useState<Record<string, Preview>>({});
@@ -71,7 +73,7 @@ export function VoiceScript({
   const audioRefs = useRef(new Map<string, HTMLAudioElement>());
   const queue = useRef<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
-  const locked = disabled || busy || loading;
+  const locked = disabled || busy || loading || exporting;
   function stop() {
     queue.current = [];
     setPlayingId(null);
@@ -192,6 +194,7 @@ export function VoiceScript({
           [line.id]: {
             key: scriptAudioKey(line),
             url: URL.createObjectURL(blob),
+            blob,
             audition: { generation, ...(model ? { modelInfo: structuredClone(model) } : {}) },
           },
         };
@@ -377,6 +380,33 @@ export function VoiceScript({
             台本の連続試聴を停止
           </button>
         </div>
+        <label>
+          結合WAVの行間（ミリ秒）
+          <input
+            aria-label="結合WAVの行間"
+            type="number"
+            min={0}
+            max={5000}
+            step={1}
+            disabled={locked}
+            value={script.gapMs}
+            onChange={(event) => {
+              const value = Number(event.target.value);
+              if (Number.isInteger(value) && value >= 0 && value <= 5000)
+                setScript({ ...script, gapMs: value });
+            }}
+          />
+        </label>
+        <ScriptAudioExport
+          script={script}
+          sources={script.lines.map(audio)}
+          disabled={locked}
+          active={active && opened}
+          onPreparingChange={(value) => {
+            setExporting(value);
+            onBusyChange(value);
+          }}
+        />
         <ol className="evaluation-history">
           {script.lines.map((line, index) => {
             const candidate = scriptCandidate(line),

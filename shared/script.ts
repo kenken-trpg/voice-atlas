@@ -15,6 +15,7 @@ export const scriptSchema = z
     format: z.literal('voice-atlas-script'),
     version: z.literal(1),
     title: z.string().max(100),
+    gapMs: z.number().int().min(0).max(5000).default(300),
     lines: z.array(scriptLineSchema).max(20),
   })
   .refine(
@@ -23,7 +24,7 @@ export const scriptSchema = z
   );
 export type VoiceScript = z.infer<typeof scriptSchema>;
 export function emptyScript(): VoiceScript {
-  return { format: 'voice-atlas-script', version: 1, title: '', lines: [] };
+  return { format: 'voice-atlas-script', version: 1, title: '', gapMs: 300, lines: [] };
 }
 export function makeScriptLine(assignment: CastingAssignment | null = null): ScriptLine {
   return scriptLineSchema.parse({ id: crypto.randomUUID(), assignment, text: '' });
