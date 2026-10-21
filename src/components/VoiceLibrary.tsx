@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useImperativeHandle, type Ref } from 'react';
 import {
   libraryStorageKey,
   libraryCandidate,
+  libraryText,
+  libraryGeneration,
   makeLibraryEntry,
   maxLibraryBytes,
   parseLibrary,
@@ -17,6 +19,7 @@ import {
 } from '../../shared/casting';
 import { download } from '../lib/http';
 import { AivisModelDetails } from './AivisModelDetails';
+export type VoiceLibraryHandle = { add: (entry: VoiceLibraryEntry) => void };
 
 export function VoiceLibrary({
   draft,
@@ -24,12 +27,14 @@ export function VoiceLibrary({
   inventory,
   checking,
   onLoad,
+  ref: handleRef,
 }: {
   draft: CastingEvaluation | null;
   disabled: boolean;
   inventory: CastingInventory | null;
   checking: boolean;
   onLoad: (entry: VoiceLibraryEntry, slot: 0 | 1) => void;
+  ref?: Ref<VoiceLibraryHandle>;
 }) {
   const [initial] = useState(() => {
     try {
@@ -80,6 +85,13 @@ export function VoiceLibrary({
     setEntries(parseLibrary(text));
     setError('');
   }
+  useImperativeHandle(handleRef, () => ({
+    add(entry) {
+      if (importing.current) throw new Error('ライブラリJSONの読み込み完了後に保存してください。');
+      persist([...entries, voiceLibraryEntrySchema.parse(entry)]);
+      setNotice('調整した声を別設定として保存しました。元の登録は保持しています。');
+    },
+  }));
   function act(action: () => void) {
     setNotice('');
     setError('');
@@ -280,10 +292,35 @@ export function VoiceLibrary({
                   {status}
                 </p>
                 <p>メモ：{entry.memo || '記入なし'}</p>
-                <p>選択理由：{entry.evaluation.reason || '記入なし'}</p>
-                <p>セリフ：{entry.evaluation.text}</p>
+                <p>
+                  {entry.variation ? '元の採用理由' : '選択理由'}：
+                  {entry.evaluation.reason || '記入なし'}
+                </p>
+                {entry.variation && (
+                  <>
+                    <p>
+                      派生元：{entry.variation.parent.characterName} /{' '}
+                      {entry.variation.parent.settingName}
+                    </p>
+                    <p>変更理由：{entry.variation.reason}</p>
+                    <details>
+                      <summary>派生元の調声値を見る</summary>
+                      <p>
+                        {castingRecipeFields(entry.variation.parent.candidate)
+                          .map(
+                            (field) =>
+                              `${field.label}：${Number((entry.variation!.parent.candidate.recipe as unknown as Record<string, unknown>)[field.key]).toFixed(2)}${field.unit}`,
+                          )
+                          .join(' ／ ')}
+                      </p>
+                    </details>
+                  </>
+                )}
+                <p>セリフ：{libraryText(entry)}</p>
                 <details>
-                  <summary>採用時の調声値・生成情報</summary>
+                  <summary>
+                    {entry.variation ? '保存時の調声値・生成情報' : '採用時の調声値・生成情報'}
+                  </summary>
                   <p>
                     {castingRecipeFields(candidate)
                       .map(
@@ -294,8 +331,7 @@ export function VoiceLibrary({
                   </p>
                   <p>
                     生成エンジン版：
-                    {entry.evaluation.generations[entry.evaluation.outcome === 'a' ? 0 : 1]
-                      ?.engineVersion ?? '未取得'}
+                    {libraryGeneration(entry)?.engineVersion ?? '未取得'}
                   </p>
                   <p>
                     登録：{new Date(entry.createdAt).toLocaleString('ja-JP')} ／ 更新：
@@ -304,7 +340,11 @@ export function VoiceLibrary({
                 </details>
                 {candidate.voice.engine === 'AivisSpeech' && (
                   <details>
-                    <summary>採用時のモデル情報・利用条件</summary>
+                    <summary>
+                      {entry.variation
+                        ? '保存時のモデル情報・利用条件'
+                        : '採用時のモデル情報・利用条件'}
+                    </summary>
                     <AivisModelDetails historical saved={candidate.modelInfo} />
                   </details>
                 )}

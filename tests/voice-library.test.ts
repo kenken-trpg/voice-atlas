@@ -6,11 +6,150 @@ import {
   makeLibraryEntry,
   parseLibrary,
   serializeLibrary,
+  makeVoiceVariation,
+  libraryText,
+  libraryGeneration,
 } from '../shared/voice-library';
 import { castingKey } from '../shared/casting';
 import { evaluationWithModelInfo } from './fixtures/aivis-model-info';
 
 describe('character voice library', () => {
+  it('derives VOICEVOX settings using its own native recipe and generation information', () => {
+    const parent = makeLibraryEntry(makeCastingEvaluation({ outcome: 'b' }), '騎士', '通常', '');
+    const candidate = structuredClone(libraryCandidate(parent));
+    candidate.recipe.speedScale = 0.65;
+    const generation = {
+      engine: 'VOICEVOX' as const,
+      engineVersion: 'test-vv',
+      checkedAt: parent.createdAt,
+    };
+    const variant = makeVoiceVariation(
+      parent,
+      {
+        candidate,
+        text: 'ゆっくり伝える。',
+        generation,
+        profile: parent.evaluation.profile,
+        characterInput: null,
+        reason: '説明用に話速を下げた',
+      },
+      '説明',
+      '',
+    );
+    const restored = parseLibrary(serializeLibrary([variant]))[0];
+    expect(libraryCandidate(restored).recipe).toMatchObject({
+      engine: 'VOICEVOX',
+      speedScale: 0.65,
+    });
+    expect(libraryCandidate(restored).recipe).not.toHaveProperty('tempoDynamicsScale');
+    expect(libraryGeneration(restored)).toEqual(generation);
+    expect(libraryCandidate(parent).recipe.speedScale).toBe(0.85);
+  });
+  it('reads v1 and writes v2, retaining derived settings without fabricating another adoption', () => {
+    const parent = makeLibraryEntry(evaluationWithModelInfo(), '案内人', '通常', '');
+    const legacy = JSON.stringify({
+      format: 'voice-atlas-voice-library',
+      version: 1,
+      entries: [parent],
+    });
+    expect(parseLibrary(legacy)).toEqual([parent]);
+    const candidate = structuredClone(libraryCandidate(parent));
+    candidate.recipe.speedScale = 0.7;
+    const variation = makeVoiceVariation(
+      parent,
+      {
+        candidate,
+        text: '長い説明です。',
+        generation: null,
+        profile: parent.evaluation.profile,
+        characterInput: parent.evaluation.characterInput,
+        reason: '長文用に遅く',
+      },
+      '長文説明用',
+      'メモ',
+    );
+    expect(variation.id).not.toBe(parent.id);
+    expect(variation.evaluation).toEqual(parent.evaluation);
+    expect(libraryCandidate(variation).recipe.speedScale).toBe(0.7);
+    expect(libraryText(variation)).toBe('長い説明です。');
+    expect(libraryGeneration(variation)).toBeNull();
+    expect(variation.variation?.parent.candidate).toEqual(libraryCandidate(parent));
+    expect(libraryCandidate(parent).recipe.speedScale).toBe(1);
+    const encoded = serializeLibrary([parent, variation]);
+    expect(JSON.parse(encoded).version).toBe(2);
+    expect(parseLibrary(encoded)).toEqual([parent, variation]);
+    const loaded = loadLibraryCandidate({}, null, variation, 0);
+    expect(loaded.candidates[loaded.key].recipe.speedScale).toBe(0.7);
+    expect(loaded.text).toBe('長い説明です。');
+    expect(libraryCandidate(variation).modelInfo?.modelVersion).toBe('1.2.3');
+  });
+  it('preserves immediate parent snapshots through repeated derivation and independent deletion', () => {
+    const parent = makeLibraryEntry(makeCastingEvaluation(), '案内人', '通常', '');
+    const snapshot = {
+      candidate: libraryCandidate(parent),
+      text: '派生のセリフ',
+      generation: null,
+      profile: parent.evaluation.profile,
+      characterInput: null,
+      reason: '用途の変更',
+    };
+    const first = makeVoiceVariation(parent, snapshot, '説明', '');
+    const second = makeVoiceVariation(
+      first,
+      {
+        ...snapshot,
+        candidate: {
+          ...snapshot.candidate,
+          recipe: { ...snapshot.candidate.recipe, speedScale: 0.6 },
+        },
+      },
+      '長文',
+      '',
+    );
+    expect(second.variation?.parent.id).toBe(first.id);
+    expect(parseLibrary(serializeLibrary([second]))[0]).toEqual(second);
+    first.settingName = '後から編集';
+    first.evaluation.reason = '変更';
+    expect(second.variation?.parent.settingName).toBe('説明');
+    expect(second.evaluation.reason).toBe(parent.evaluation.reason);
+  });
+  it('rejects invalid variation provenance, engines, links and v1 files containing v2 data', () => {
+    const parent = makeLibraryEntry(evaluationWithModelInfo(), '案内人', '通常', '');
+    const variation = makeVoiceVariation(
+      parent,
+      {
+        candidate: libraryCandidate(parent),
+        text: 'セリフ',
+        generation: null,
+        profile: parent.evaluation.profile,
+        characterInput: null,
+        reason: '変更理由',
+      },
+      '説明',
+      '',
+    );
+    const self = structuredClone(variation);
+    self.id = parent.id;
+    expect(() => serializeLibrary([self])).toThrow();
+    const wrong = structuredClone(variation);
+    wrong.variation!.candidate = parent.evaluation.candidates[1];
+    expect(() => serializeLibrary([wrong])).toThrow();
+    const gen = structuredClone(variation);
+    gen.variation!.generation = {
+      engine: 'VOICEVOX',
+      engineVersion: null,
+      checkedAt: parent.createdAt,
+    };
+    expect(() => serializeLibrary([gen])).toThrow();
+    const link = structuredClone(variation);
+    link.variation!.candidate.modelInfo!.links = ['javascript:alert(1)'];
+    expect(() => serializeLibrary([link])).toThrow();
+    expect(() =>
+      parseLibrary(
+        JSON.stringify({ format: 'voice-atlas-voice-library', version: 1, entries: [variation] }),
+      ),
+    ).toThrow();
+  });
   it('roundtrips adopted native values and original evidence without sharing mutable objects', () => {
     const source = evaluationWithModelInfo();
     const entry = makeLibraryEntry(source, ' 案内人 ', ' 通常 ', 'メモ');

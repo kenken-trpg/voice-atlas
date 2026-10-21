@@ -2216,20 +2216,24 @@ footer small {
   margin: 1.25rem 0;
   overflow-wrap: anywhere;
 }
-.voice-library fieldset {
+.voice-library fieldset,
+.voice-variation {
   min-width: 0;
   margin: 1rem 0;
   padding: 1rem;
   border: 1px solid var(--line);
   border-radius: 12px;
 }
-.voice-library label {
+.voice-library label,
+.voice-variation label {
   display: grid;
   gap: 0.4rem;
   margin: 0.75rem 0;
 }
 .voice-library input,
-.voice-library textarea {
+.voice-library textarea,
+.voice-variation input,
+.voice-variation textarea {
   width: 100%;
   min-width: 0;
   max-width: 100%;
