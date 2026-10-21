@@ -316,7 +316,16 @@ export function LibraryComparison({
   return (
     <section ref={sectionRef} className="library-comparison" aria-label="保存した設定の比較">
       <h3>保存した設定を聴き比べる</h3>
-      <CastingBoard records={records} disabled={locked} onLoad={onLoad} />
+      <CastingBoard
+        records={records}
+        disabled={locked}
+        onLoad={onLoad}
+        active={active}
+        inventory={inventory}
+        checking={checking}
+        currentModel={currentModel}
+        onBusyChange={onBusyChange}
+      />
       <p>
         異なる2件の登録を選びます。同じ話者・スタイルの調声違いも比較できます。読み込んだ設定はコピーとして保持し、その後の登録の編集・削除は比較に反映しません。
       </p>

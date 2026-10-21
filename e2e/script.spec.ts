@@ -1,0 +1,280 @@
+import { test, expect, type Page, type Locator } from '@playwright/test';
+import { scriptFixture } from '../tests/fixtures/script';
+import { serializeCastingBoard, castingBoardStorageKey } from '../shared/casting-board';
+import { parseScript, serializeScript, scriptCandidate, scriptStorageKey } from '../shared/script';
+const fixture = scriptFixture();
+const file = (value: unknown) => ({
+  name: 'script.json',
+  mimeType: 'application/json',
+  buffer: Buffer.from(typeof value === 'string' ? value : JSON.stringify(value)),
+});
+function wav() {
+  const bytes = Buffer.alloc(24044);
+  bytes.write('RIFF');
+  bytes.writeUInt32LE(bytes.length - 8, 4);
+  bytes.write('WAVE', 8);
+  bytes.write('fmt ', 12);
+  bytes.writeUInt32LE(16, 16);
+  bytes.writeUInt16LE(1, 20);
+  bytes.writeUInt16LE(1, 22);
+  bytes.writeUInt32LE(24000, 24);
+  bytes.writeUInt32LE(48000, 28);
+  bytes.writeUInt16LE(2, 32);
+  bytes.writeUInt16LE(16, 34);
+  bytes.write('data', 36);
+  bytes.writeUInt32LE(24000, 40);
+  return bytes;
+}
+async function open(page: Page, seed = true) {
+  if (seed)
+    await page.addInitScript(
+      ({ key, value }) => {
+        if (!localStorage.getItem(key)) localStorage.setItem(key, value);
+      },
+      { key: castingBoardStorageKey, value: serializeCastingBoard(fixture.assignments) },
+    );
+  await page.route('**/api/casting/voices', (route) =>
+    route.fulfill({
+      json: {
+        checkedAt: fixture.assignments[0].assignedAt,
+        engines: [
+          { engine: 'AivisSpeech', ready: true, detail: '接続済み' },
+          { engine: 'VOICEVOX', ready: true, detail: '接続済み' },
+        ],
+        voices: fixture.script.lines.map((line) => scriptCandidate(line)!.voice),
+      },
+    }),
+  );
+  await page.route('**/api/casting/aivis-models', (route) =>
+    route.fulfill({
+      json: { ready: false, checkedAt: fixture.assignments[0].assignedAt, models: [] },
+    }),
+  );
+  await page.goto('/');
+  await expand(page);
+  return page.getByRole('region', { name: '台本の試聴', exact: true });
+}
+async function expand(page: Page) {
+  await page.getByRole('button', { name: 'VOICEVOX・AivisSpeechを比較する', exact: true }).click();
+  await page.getByText('キャラクターの採用声ライブラリ', { exact: true }).click();
+  await page.getByText('台本を作成・試聴する', { exact: true }).click();
+}
+async function imported(panel: Locator) {
+  await panel.getByLabel('台本JSONファイル').setInputFiles(file(serializeScript(fixture.script)));
+  await expect(panel.getByLabel('第1行のセリフ')).toHaveValue('ようこそ。');
+}
+async function exported(page: Page, panel: Locator) {
+  const event = page.waitForEvent('download');
+  await panel.getByRole('button', { name: '台本JSONを保存', exact: true }).click();
+  const stream = await (await event).createReadStream();
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+  return parseScript(Buffer.concat(chunks).toString());
+}
+test('assigns board voices, generates native audio in order, plays the dialogue and retains audio through reordering', async ({
+  page,
+}, testInfo) => {
+  const calls: { text: string; candidate: { recipe: { engine: string; speedScale: number } } }[] =
+    [];
+  await page.route('**/api/casting/preview', (route) => {
+    calls.push(route.request().postDataJSON());
+    return route.fulfill({
+      contentType: 'audio/wav',
+      body: wav(),
+      headers: {
+        'X-Voice-Atlas-Generation': encodeURIComponent(
+          JSON.stringify({
+            engine: calls.at(-1)!.candidate.recipe.engine,
+            engineVersion: 'script-test',
+            checkedAt: fixture.assignments[0].assignedAt,
+          }),
+        ),
+      },
+    });
+  });
+  const panel = await open(page);
+  await panel.getByLabel('台本名').fill('導入の会話');
+  for (let i = 0; i < 2; i++) {
+    await panel.getByRole('button', { name: '台本に行を追加', exact: true }).click();
+    await panel
+      .getByLabel(`第${i + 1}行の声`, { exact: true })
+      .selectOption(fixture.assignments[i].id);
+    await panel
+      .getByLabel(`第${i + 1}行のセリフ`, { exact: true })
+      .fill(fixture.script.lines[i].text);
+  }
+  const board = page.getByRole('region', { name: 'キャスティング表', exact: true });
+  const sourceRow = board.locator(':scope > ol > li').first();
+  await sourceRow.getByRole('button', { name: '確定設定を削除', exact: true }).click();
+  await sourceRow.getByRole('button', { name: 'この確定設定を削除する', exact: true }).click();
+  await expect(panel.getByLabel('第1行の声', { exact: true })).toHaveValue('snapshot');
+  await panel.getByRole('button', { name: '未生成の行を台本順に生成', exact: true }).click();
+  await expect(panel.locator('audio')).toHaveCount(2);
+  expect(calls.map((call) => call.text)).toEqual(['ようこそ。', '案内を頼もう。']);
+  expect(
+    calls.map((call) => [call.candidate.recipe.engine, call.candidate.recipe.speedScale]),
+  ).toEqual([
+    ['AivisSpeech', 1],
+    ['VOICEVOX', 0.85],
+  ]);
+  const firstUrl = await panel.getByLabel('台本の第1行の試聴', { exact: true }).getAttribute('src');
+  const downloadEvent = page.waitForEvent('download');
+  await panel.getByRole('link', { name: '第1行のWAVを保存', exact: true }).click();
+  expect((await downloadEvent).suggestedFilename()).toBe('voice-atlas-script-01.wav');
+  await page.evaluate(() => {
+    (window as unknown as { plays: string[] }).plays = [];
+    document.addEventListener(
+      'play',
+      (e) => {
+        if (e.target instanceof HTMLAudioElement)
+          (window as unknown as { plays: string[] }).plays.push(
+            e.target.getAttribute('aria-label')!,
+          );
+      },
+      true,
+    );
+  });
+  await panel.getByRole('button', { name: '台本順に連続試聴', exact: true }).click();
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { plays: string[] }).plays))
+    .toEqual(['台本の第1行の試聴', '台本の第2行の試聴']);
+  await expect(panel.getByRole('button', { name: '台本順に連続試聴', exact: true })).toBeEnabled();
+  await panel.getByRole('button', { name: '台本順に連続試聴', exact: true }).click();
+  await panel.getByRole('button', { name: '台本の連続試聴を停止', exact: true }).click();
+  await expect(panel.getByRole('button', { name: '台本順に連続試聴', exact: true })).toBeEnabled();
+  expect(
+    await panel
+      .locator('audio')
+      .evaluateAll((elements) => elements.every((element) => (element as HTMLAudioElement).paused)),
+  ).toBe(true);
+  await panel.getByRole('button', { name: '第2行を上へ', exact: true }).click();
+  await expect(panel.getByLabel('第2行のセリフ', { exact: true })).toHaveValue('ようこそ。');
+  await expect(panel.getByLabel('台本の第2行の試聴', { exact: true })).toHaveAttribute(
+    'src',
+    firstUrl!,
+  );
+  await panel.getByLabel('第1行のセリフ', { exact: true }).fill('変更したセリフ');
+  await expect(panel.locator('audio')).toHaveCount(1);
+  await expect(panel.getByRole('button', { name: '台本順に連続試聴', exact: true })).toBeDisabled();
+  await panel.getByRole('button', { name: '未生成の行を台本順に生成', exact: true }).click();
+  await expect(panel.locator('audio')).toHaveCount(2);
+  expect(calls).toHaveLength(3);
+  await panel.getByRole('button', { name: '台本をブラウザに保存', exact: true }).click();
+  const saved = await exported(page, panel);
+  expect(saved.lines[0].text).toBe('変更したセリフ');
+  await panel.getByText('割り当てた声の設定', { exact: true }).first().click();
+  await panel.screenshot({ path: testInfo.outputPath('voice-script.png') });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.reload();
+  await expand(page);
+  await expect(panel.locator('audio')).toHaveCount(0);
+  await expect(panel.getByLabel('第1行のセリフ', { exact: true })).toHaveValue('変更したセリフ');
+  await panel.getByLabel('第1行のセリフ', { exact: true }).fill('編集中');
+  await panel.getByLabel('台本JSONファイル').setInputFiles(file(saved));
+  await expect(panel.getByLabel('第1行のセリフ', { exact: true })).toHaveValue('変更したセリフ');
+  expect(calls).toHaveLength(3);
+});
+test('keeps partial audio, retries failure, cancels on demand or closing and blocks other generators', async ({
+  page,
+}) => {
+  let calls = 0,
+    fail = true,
+    hold = false;
+  let release: (() => void) | undefined;
+  await page.route('**/api/casting/preview', async (route) => {
+    calls++;
+    if (hold)
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    if (fail && calls === 2) return route.fulfill({ status: 502, json: { error: 'テスト失敗' } });
+    return route.fulfill({ contentType: 'audio/wav', body: wav() });
+  });
+  const panel = await open(page);
+  await imported(panel);
+  await panel.getByRole('button', { name: '未生成の行を台本順に生成', exact: true }).click();
+  await expect(panel.getByRole('alert')).toContainText('第2行');
+  await expect(panel.locator('audio')).toHaveCount(1);
+  const url = await panel.locator('audio').getAttribute('src');
+  fail = false;
+  await panel.getByRole('button', { name: '未生成の行を台本順に生成', exact: true }).click();
+  await expect(panel.locator('audio')).toHaveCount(2);
+  expect(calls).toBe(3);
+  await expect(panel.getByLabel('台本の第1行の試聴', { exact: true })).toHaveAttribute('src', url!);
+  hold = true;
+  await panel.getByLabel('第1行のセリフ', { exact: true }).fill('変更');
+  await panel.getByRole('button', { name: '未生成の行を台本順に生成', exact: true }).click();
+  await expect.poll(() => calls).toBe(4);
+  await expect(
+    page.getByRole('button', { name: '製品比較のA・Bを生成', exact: true }),
+  ).toBeDisabled();
+  await panel.getByRole('button', { name: '台本の生成を中止', exact: true }).click();
+  await expect(panel.getByRole('button', { name: '台本の生成を中止', exact: true })).toHaveCount(0);
+  release?.();
+  await expect(panel.locator('audio')).toHaveCount(1);
+  await panel.getByRole('button', { name: '未生成の行を台本順に生成', exact: true }).click();
+  await expect.poll(() => calls).toBe(5);
+  await page.getByText('台本を作成・試聴する', { exact: true }).click();
+  release?.();
+  await expect(panel).not.toBeVisible();
+  await page.getByText('台本を作成・試聴する', { exact: true }).click();
+  await expect(panel.getByRole('button', { name: '台本の生成を中止', exact: true })).toHaveCount(0);
+  hold = false;
+  await panel.getByRole('button', { name: '未生成の行を台本順に生成', exact: true }).click();
+  await expect(panel.locator('audio')).toHaveCount(2);
+  expect(calls).toBe(6);
+  await expect(panel.getByText('今回の生成エンジン版：未取得')).toHaveCount(2);
+});
+test('rejects invalid imports and quota failures atomically and enforces row limits and unavailable voice guards', async ({
+  page,
+}) => {
+  let calls = 0;
+  await page.route('**/api/casting/preview', (route) => {
+    calls++;
+    return route.fulfill({ contentType: 'audio/wav', body: wav() });
+  });
+  const panel = await open(page);
+  await imported(panel);
+  await panel.getByRole('button', { name: '未生成の行を台本順に生成', exact: true }).click();
+  await expect(panel.locator('audio')).toHaveCount(2);
+  await panel.getByLabel('台本JSONファイル').setInputFiles(file({ ...fixture.script, version: 2 }));
+  await expect(panel.getByRole('alert')).toContainText('保持');
+  await expect(panel.locator('audio')).toHaveCount(2);
+  const duplicate = {
+    ...fixture.script,
+    lines: [fixture.script.lines[0], fixture.script.lines[0]],
+  };
+  await panel.getByLabel('台本JSONファイル').setInputFiles(file(duplicate));
+  await expect(panel.locator('audio')).toHaveCount(2);
+  await page.evaluate(() => {
+    Storage.prototype.setItem = () => {
+      throw new DOMException('quota', 'QuotaExceededError');
+    };
+  });
+  await panel
+    .getByLabel('台本JSONファイル')
+    .setInputFiles(file({ ...fixture.script, title: '失敗する読み込み' }));
+  await expect(panel.getByLabel('台本名')).toHaveValue('導入の会話');
+  await expect(panel.locator('audio')).toHaveCount(2);
+  await panel.getByRole('button', { name: '台本をブラウザに保存', exact: true }).click();
+  await expect(panel.getByRole('alert')).toContainText('保持');
+  await page.reload();
+  await expand(page);
+  for (let i = 2; i < 20; i++)
+    await panel.getByRole('button', { name: '台本に行を追加', exact: true }).click();
+  await expect(panel.getByRole('button', { name: '台本に行を追加', exact: true })).toBeDisabled();
+  await expect(
+    panel.getByRole('button', { name: '未生成の行を台本順に生成', exact: true }),
+  ).toBeDisabled();
+  await panel.getByRole('button', { name: '第20行を削除', exact: true }).click();
+  await expect(panel.getByRole('button', { name: '台本に行を追加', exact: true })).toBeEnabled();
+  const unavailable = structuredClone(fixture.script);
+  const voice =
+    unavailable.lines[1].assignment!.comparison.entries[1].evaluation.candidates[1].voice;
+  if (voice.engine !== 'VOICEVOX') throw new Error('fixture');
+  voice.voiceId = 'removed-voice';
+  await panel.getByLabel('台本JSONファイル').setInputFiles(file(unavailable));
+  await expect(panel.getByText(/現行カタログ対象外/)).toBeVisible();
+  await expect(panel.getByRole('button', { name: '第2行を生成', exact: true })).toBeDisabled();
+  expect(calls).toBe(2);
+});

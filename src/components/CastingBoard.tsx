@@ -10,7 +10,13 @@ import {
 } from '../../shared/casting-board';
 import { type LibraryComparisonRecord } from '../../shared/library-comparison';
 import { libraryCandidate, type VoiceLibraryEntry } from '../../shared/voice-library';
-import { castingRecipeFields } from '../../shared/casting';
+import {
+  castingRecipeFields,
+  type CastingCandidate,
+  type CastingInventory,
+} from '../../shared/casting';
+import { type AivisModelInfo } from '../../shared/aivis-model-info';
+import { VoiceScript } from './VoiceScript';
 import { download } from '../lib/http';
 import { AivisModelDetails } from './AivisModelDetails';
 
@@ -18,10 +24,20 @@ export function CastingBoard({
   records,
   disabled,
   onLoad,
+  active,
+  inventory,
+  checking,
+  currentModel,
+  onBusyChange,
 }: {
   records: LibraryComparisonRecord[];
   disabled: boolean;
   onLoad: (entry: VoiceLibraryEntry, slot: 0 | 1) => void;
+  active: boolean;
+  inventory: CastingInventory | null;
+  checking: boolean;
+  currentModel: (candidate: CastingCandidate) => AivisModelInfo | undefined;
+  onBusyChange: (busy: boolean) => void;
 }) {
   const [initial] = useState(() => {
     try {
@@ -137,6 +153,15 @@ export function CastingBoard({
       </p>
       {error && <p role="alert">{error}</p>}
       {notice && <p role="status">{notice}</p>}
+      <VoiceScript
+        assignments={items}
+        disabled={locked}
+        active={active}
+        inventory={inventory}
+        checking={checking}
+        currentModel={currentModel}
+        onBusyChange={onBusyChange}
+      />
       <fieldset disabled={locked}>
         <legend>比較で選んだ声を確定</legend>
         <label>
