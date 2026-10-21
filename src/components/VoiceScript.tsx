@@ -25,6 +25,7 @@ import { download } from '../lib/http';
 import { pauseOtherAudio } from './ComparisonPanel';
 import { AivisModelDetails } from './AivisModelDetails';
 import { ScriptAudioExport } from './ScriptAudioExport';
+import { ScriptLibrary, type ScriptLibraryHandle } from './ScriptLibrary';
 
 type Preview = { key: string; url: string; blob: Blob; audition: LibraryAudition };
 export function VoiceScript({
@@ -63,6 +64,8 @@ export function VoiceScript({
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [switching, setSwitching] = useState(false);
+  const libraryRef = useRef<ScriptLibraryHandle>(null);
   const [generatingId, setGeneratingId] = useState<string | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [previews, setPreviews] = useState<Record<string, Preview>>({});
@@ -73,7 +76,8 @@ export function VoiceScript({
   const audioRefs = useRef(new Map<string, HTMLAudioElement>());
   const queue = useRef<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
-  const locked = disabled || busy || loading || exporting;
+  const baseLocked = disabled || busy || loading || exporting;
+  const locked = baseLocked || switching;
   function stop() {
     queue.current = [];
     setPlayingId(null);
@@ -252,10 +256,9 @@ export function VoiceScript({
     try {
       if (file.size > maxScriptBytes) throw new Error('size');
       const saved = parseScript(await file.text());
-      localStorage.setItem(scriptStorageKey, serializeScript(saved));
-      clear();
-      setScript(saved);
-      setNotice('台本を復元しました。音声は再生成してください。キャスティング表は変更しません。');
+      libraryRef.current?.replace(saved, () =>
+        localStorage.setItem(scriptStorageKey, serializeScript(saved)),
+      );
     } catch {
       setError(
         '台本JSONの形式・20行/8MiBの上限・保存容量を確認してください。現在の台本と音声は保持しています。',
@@ -286,6 +289,18 @@ export function VoiceScript({
         </p>
         {error && <p role="alert">{error}</p>}
         {notice && <p role="status">{notice}</p>}
+        <ScriptLibrary
+          ref={libraryRef}
+          script={script}
+          disabled={baseLocked}
+          onPendingChange={setSwitching}
+          onOpen={(value) => {
+            clear();
+            setScript(value);
+            setError('');
+            setNotice('');
+          }}
+        />
         <label>
           台本名
           <input

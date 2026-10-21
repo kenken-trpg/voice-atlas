@@ -171,6 +171,7 @@ test('assigns board voices, generates native audio in order, plays the dialogue 
   await expect(panel.getByLabel('第1行のセリフ', { exact: true })).toHaveValue('変更したセリフ');
   await panel.getByLabel('第1行のセリフ', { exact: true }).fill('編集中');
   await panel.getByLabel('台本JSONファイル').setInputFiles(file(saved));
+  await panel.getByRole('button', { name: '台本を保存せず切り替える', exact: true }).click();
   await expect(panel.getByLabel('第1行のセリフ', { exact: true })).toHaveValue('変更したセリフ');
   expect(calls).toHaveLength(3);
 });
@@ -257,7 +258,7 @@ test('rejects invalid imports and quota failures atomically and enforces row lim
   await expect(panel.getByLabel('台本名')).toHaveValue('導入の会話');
   await expect(panel.locator('audio')).toHaveCount(2);
   await panel.getByRole('button', { name: '台本をブラウザに保存', exact: true }).click();
-  await expect(panel.getByRole('alert')).toContainText('保持');
+  await expect(panel.locator(':scope > [role="alert"]')).toContainText('保持');
   await page.reload();
   await expand(page);
   for (let i = 2; i < 20; i++)
@@ -274,6 +275,7 @@ test('rejects invalid imports and quota failures atomically and enforces row lim
   if (voice.engine !== 'VOICEVOX') throw new Error('fixture');
   voice.voiceId = 'removed-voice';
   await panel.getByLabel('台本JSONファイル').setInputFiles(file(unavailable));
+  await panel.getByRole('button', { name: '台本を保存せず切り替える', exact: true }).click();
   await expect(panel.getByText(/現行カタログ対象外/)).toBeVisible();
   await expect(panel.getByRole('button', { name: '第2行を生成', exact: true })).toBeDisabled();
   expect(calls).toBe(2);

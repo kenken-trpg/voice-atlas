@@ -2323,3 +2323,19 @@ footer small {
 .voice-script textarea {
   min-height: 5rem;
 }
+
+.script-library {
+  border-block: 1px solid var(--line);
+  margin: 1rem 0;
+  padding: 1rem 0;
+  min-width: 0;
+}
+.script-library [role='group'] {
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.script-library [role='group'] button {
+  margin: 0.3rem;
+}
