@@ -1,64 +1,15 @@
 import sharp from 'sharp';
 import { z } from 'zod';
-import {
-  analysisSchema,
-  providerLabels,
-  type Analysis,
-  type Capabilities,
-  type Recipe,
-  type Voice,
-} from '../shared/schema';
+import { analysisSchema, providerLabels, type Analysis, type Capabilities } from '../shared/schema';
 import type { Config } from './config';
 import { analysisSchemas } from './analysis-schemas';
 import { analyzeRequestSchema } from './validation';
 import { voices } from '../shared/catalog';
 import { findVoicevoxStyle } from '../shared/voicevox';
-import { engineInfoSchema, type EngineInfo } from '../shared/evaluation-evidence';
-import { AppError, remoteJson, remoteBytes, maxWavBytes, type Fetcher } from './remote';
+import { AppError, remoteJson, type Fetcher } from './remote';
 export { AppError, type Fetcher } from './remote';
+import { createTtsAdapter } from './tts';
 
-// Optional provenance: failure must not turn successfully generated audio into an error.
-export async function getEngineInfo(
-  config: Config,
-  fetcher: Fetcher = fetch,
-): Promise<EngineInfo | null> {
-  try {
-    const bytes = await remoteBytes(`${config.voicevoxUrl}/version`, {}, 1000, fetcher, 1024);
-    const result = engineInfoSchema.safeParse({
-      engine: 'VOICEVOX',
-      version: JSON.parse(bytes.toString('utf8')),
-      checkedAt: new Date().toISOString(),
-    });
-    return result.success ? result.data : null;
-  } catch {
-    return null;
-  }
-}
-
-const speakerSchema = z.array(
-  z.object({
-    name: z.string(),
-    speaker_uuid: z.string(),
-    styles: z.array(
-      z.object({
-        name: z.string(),
-        id: z.number().int().nonnegative(),
-        type: z.string().optional(),
-      }),
-    ),
-  }),
-);
-export async function getSpeakers(config: Config, fetcher: Fetcher = fetch) {
-  const result = speakerSchema.safeParse(
-    await remoteJson(`${config.voicevoxUrl}/speakers`, {}, 2500, fetcher),
-  );
-  if (!result.success)
-    throw new AppError(
-      502,
-      'VOICEVOXから話者一覧を取得できませんでした。エンジンのバージョンを確認してください。',
-    );
-  return result.data;
-}
 export async function capabilities(
   config: Config,
   fetcher: Fetcher = fetch,
@@ -74,7 +25,7 @@ export async function capabilities(
       2500,
       fetcher,
     ),
-    getSpeakers(config, fetcher),
+    createTtsAdapter(config, 'VOICEVOX', fetcher).listSpeakers(),
   ]);
   const info =
     ollama.status === 'fulfilled'
@@ -418,52 +369,4 @@ export async function analyzeCharacter(
       'AIから提案の形式を取得できませんでした。画像対応モデル・構造化出力への対応を確認してください。',
     );
   }
-}
-export async function synthesize(
-  config: Config,
-  voice: Voice,
-  text: string,
-  recipe: Recipe,
-  fetcher: Fetcher = fetch,
-): Promise<Buffer> {
-  if (voice.engine !== 'VOICEVOX')
-    throw new AppError(
-      400,
-      'この話者はアプリ内試聴に対応していません。公式サンプルをご利用ください。',
-    );
-  const speakers = await getSpeakers(config, fetcher);
-  const style = findVoicevoxStyle(speakers, voice);
-  if (!style)
-    throw new AppError(
-      409,
-      `接続中のVOICEVOXに「${voice.name} / ${voice.style}」がありません。音声ライブラリを確認してください。`,
-    );
-  const params = new URLSearchParams({ text, speaker: String(style.id) });
-  const queryResult = z
-    .record(z.string(), z.unknown())
-    .safeParse(
-      await remoteJson(
-        `${config.voicevoxUrl}/audio_query?${params}`,
-        { method: 'POST' },
-        30_000,
-        fetcher,
-      ),
-    );
-  if (!queryResult.success)
-    throw new AppError(502, 'VOICEVOXから有効な音声クエリを取得できませんでした。');
-  const query = queryResult.data;
-  const wav = await remoteBytes(
-    `${config.voicevoxUrl}/synthesis?speaker=${style.id}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...query, ...recipe, outputSamplingRate: 24000, outputStereo: false }),
-    },
-    60_000,
-    fetcher,
-    maxWavBytes,
-  );
-  if (wav.toString('ascii', 0, 4) !== 'RIFF' || wav.toString('ascii', 8, 12) !== 'WAVE')
-    throw new AppError(502, 'VOICEVOXから有効なWAV音声が返りませんでした。');
-  return wav;
 }

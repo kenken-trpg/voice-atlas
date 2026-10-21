@@ -3,6 +3,7 @@ import { request, type Server } from 'node:http';
 import { gzipSync } from 'node:zlib';
 import sharp from 'sharp';
 import { createApp } from '../server/app';
+import { createTtsAdapter } from '../server/tts';
 import type { Config } from '../server/config';
 import { makeRecipe } from '../shared/recommend';
 import { voices } from '../shared/catalog';
@@ -839,5 +840,52 @@ describe('Google Gemini vision (mocked, no paid requests)', () => {
     expect(body).toContain(String(status));
     expect(body).not.toContain('private-google-detail');
     expect(body).not.toContain(config.geminiKey);
+  });
+});
+
+describe('TTS adapter boundary', () => {
+  it('rejects unsupported engines without making any upstream request', () => {
+    const voice = voices.find((item) => item.engine !== 'VOICEVOX')!;
+    expect(() => createTtsAdapter(config, voice.engine, mockFetch)).toThrow(
+      'この話者はアプリ内試聴に対応していません',
+    );
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('validates the engine, text and recipe before contacting the engine', async () => {
+    const adapter = createTtsAdapter(config, 'VOICEVOX', mockFetch);
+    const voice = voices.find((item) => item.engine === 'VOICEVOX')!;
+    const recipe = makeRecipe(neutralProfile, voice);
+    await expect(
+      adapter.synthesize({
+        voice: voices.find((item) => item.engine !== 'VOICEVOX')!,
+        text: '比較するセリフです。',
+        recipe,
+      }),
+    ).rejects.toThrow('このエンジンに対応していません');
+    await expect(adapter.synthesize({ voice, text: '   ', recipe })).rejects.toThrow();
+    await expect(
+      adapter.synthesize({
+        voice,
+        text: '比較するセリフです。',
+        recipe: { ...recipe, speedScale: 100 },
+      }),
+    ).rejects.toThrow();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('does not request version metadata when synthesis fails', async () => {
+    mockFetch.mockResolvedValue(json([]));
+    const adapter = createTtsAdapter(config, 'VOICEVOX', mockFetch);
+    const voice = voices.find((item) => item.engine === 'VOICEVOX')!;
+    await expect(
+      adapter.synthesize({
+        voice,
+        text: '比較するセリフです。',
+        recipe: makeRecipe(neutralProfile, voice),
+      }),
+    ).rejects.toThrow('音声ライブラリを確認してください');
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockFetch.mock.calls[0][0]).toBe(config.voicevoxUrl + '/speakers');
   });
 });

@@ -4,14 +4,8 @@ import { voices, catalogReviewedAt } from '../shared/catalog';
 import { analyzeRequestSchema, previewRequestSchema, recommendRequestSchema } from './validation';
 import { recommend } from '../shared/recommend';
 import type { Config } from './config';
-import {
-  analyzeCharacter,
-  AppError,
-  capabilities,
-  synthesize,
-  getEngineInfo,
-  type Fetcher,
-} from './services';
+import { analyzeCharacter, AppError, capabilities, type Fetcher } from './services';
+import { createTtsAdapter } from './tts';
 
 export function createApp(config: Config, fetcher: Fetcher = fetch) {
   const app = express();
@@ -77,11 +71,10 @@ export function createApp(config: Config, fetcher: Fetcher = fetch) {
     const input = previewRequestSchema.parse(req.body);
     const voice = voices.find((item) => item.id === input.voiceId);
     if (!voice) throw new AppError(404, '話者が見つかりません。');
-    const { wav, engineInfo } = await runExclusive(async () => {
-      const wav = await synthesize(config, voice, input.text, input.recipe, fetcher);
-      const engineInfo = await getEngineInfo(config, fetcher);
-      return { wav, engineInfo };
-    });
+    const adapter = createTtsAdapter(config, voice.engine, fetcher);
+    const { wav, engineInfo } = await runExclusive(() =>
+      adapter.synthesize({ voice, text: input.text, recipe: input.recipe }),
+    );
     if (engineInfo)
       res.setHeader('X-Voice-Atlas-Engine', encodeURIComponent(JSON.stringify(engineInfo)));
     res.type('audio/wav').send(wav);
