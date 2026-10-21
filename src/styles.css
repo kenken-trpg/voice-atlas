@@ -2197,3 +2197,38 @@ footer small {
   overflow-wrap: anywhere;
   margin: 12px 0;
 }
+
+.casting-workspace {
+  margin: 1.5rem 0;
+  padding: clamp(1rem, 3vw, 2rem);
+  border: 1px solid var(--border, #ddd);
+  border-radius: 16px;
+}
+.casting-workspace[hidden] {
+  display: none;
+}
+.casting-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.casting-workspace select,
+.casting-workspace textarea {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+.casting-workspace .comparison-candidate {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.casting-workspace .recipe-control small {
+  display: block;
+  line-height: 1.6;
+}
+.casting-workspace .recipe-control output {
+  float: right;
+}
+.casting-workspace .comparison-evaluation > label {
+  margin-right: 1rem;
+}

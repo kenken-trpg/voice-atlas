@@ -45,6 +45,7 @@ import {
 } from '../shared/evaluation-evidence';
 import { ComparisonPanel, pauseOtherAudio } from './components/ComparisonPanel';
 import { EvaluationWorkbench } from './components/EvaluationWorkbench';
+import { CastingWorkspace } from './components/CastingWorkspace';
 import { HelpTip } from './components/HelpTip';
 import { VoiceMark } from './components/VoiceMark';
 import { RecipeControls } from './components/RecipeControls';
@@ -105,6 +106,7 @@ function App() {
   const [comparisonIds, setComparisonIds] = useState<[string, string] | null>(null);
   const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
   const [evaluationOpen, setEvaluationOpen] = useState(false);
+  const [castingOpen, setCastingOpen] = useState(false);
   const [notice, setNotice] = useState('');
   const [loadingRecipe, setLoadingRecipe] = useState(false);
   const [text, setText] = useState(defaultText);
@@ -617,6 +619,24 @@ function App() {
             {evaluationOpen ? '評価記録の集計を閉じる' : '評価記録をまとめる'}
           </button>
         </div>
+        <div className="recipe-import">
+          <button
+            className="secondary-button"
+            aria-expanded={castingOpen}
+            aria-controls="casting-workspace"
+            onClick={() => setCastingOpen(!castingOpen)}
+          >
+            {castingOpen ? '製品横断の比較を閉じる' : 'VOICEVOX・AivisSpeechを比較する'}
+          </button>
+        </div>
+        <div id="casting-workspace">
+          <CastingWorkspace
+            open={castingOpen}
+            disabled={disabled}
+            profile={profile}
+            characterInput={profileInput}
+          />
+        </div>
         <div hidden={!evaluationOpen}>
           <EvaluationWorkbench currentEvaluations={evaluations} />
         </div>
@@ -719,6 +739,14 @@ function App() {
                 <code>127.0.0.1:50021</code>
                 <small>
                   このコンピューターでVOICEVOXを起動すると、対応する話者を試聴できます。
+                </small>
+              </div>
+              <div>
+                <strong>AivisSpeech</strong>
+                <p>「VOICEVOX・AivisSpeechを比較する」から接続を確認</p>
+                <code>127.0.0.1:10101</code>
+                <small>
+                  AivisSpeechを起動してください。接続先は.envのAIVIS_BASE_URLで変更できます。設定後はサーバーを再起動してください。
                 </small>
               </div>
             </div>

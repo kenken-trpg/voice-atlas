@@ -6,6 +6,8 @@ import { recommend } from '../shared/recommend';
 import type { Config } from './config';
 import { analyzeCharacter, AppError, capabilities, type Fetcher } from './services';
 import { createTtsAdapter } from './tts';
+import { castingPreviewSchema } from '../shared/casting';
+import { castingInventory, castingSynthesize } from './tts/casting';
 
 export function createApp(config: Config, fetcher: Fetcher = fetch) {
   const app = express();
@@ -78,6 +80,24 @@ export function createApp(config: Config, fetcher: Fetcher = fetch) {
     if (engineInfo)
       res.setHeader('X-Voice-Atlas-Engine', encodeURIComponent(JSON.stringify(engineInfo)));
     res.type('audio/wav').send(wav);
+  });
+  let pendingCasting: ReturnType<typeof castingInventory> | undefined;
+  app.get('/api/casting/voices', async (_req, res) => {
+    pendingCasting ??= castingInventory(config, fetcher).finally(() => {
+      pendingCasting = undefined;
+    });
+    res.json(await pendingCasting);
+  });
+  app.post('/api/casting/preview', async (req, res) => {
+    const input = castingPreviewSchema.parse(req.body);
+    const result = await runExclusive(() =>
+      castingSynthesize(config, input.candidate, input.text, fetcher),
+    );
+    res.setHeader(
+      'X-Voice-Atlas-Generation',
+      encodeURIComponent(JSON.stringify(result.generation)),
+    );
+    res.type('audio/wav').send(result.wav);
   });
   app.use('/api', (_req, res) => res.status(404).json({ error: 'APIが見つかりません。' }));
   const onError: ErrorRequestHandler = (error: unknown, _req, res, _next) => {

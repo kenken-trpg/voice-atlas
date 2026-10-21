@@ -889,3 +889,126 @@ describe('TTS adapter boundary', () => {
     expect(mockFetch.mock.calls[0][0]).toBe(config.voicevoxUrl + '/speakers');
   });
 });
+
+describe('cross-product casting API', () => {
+  const uuid = '11111111-1111-4111-8111-111111111111';
+  const candidate = {
+    voice: { engine: 'AivisSpeech', speakerUuid: uuid, name: '検証用話者', style: 'ノーマル' },
+    recipe: { engine: 'AivisSpeech', tempoDynamicsScale: 0.7, intonationScale: 1.2 },
+  };
+  it('discovers independent engine availability and excludes ambiguous/singing styles', async () => {
+    mockFetch.mockImplementation(async (url) => {
+      if (String(url).startsWith('http://127.0.0.1:10101'))
+        return json([
+          {
+            speaker_uuid: uuid,
+            name: '検証用話者',
+            styles: [
+              { name: 'ノーマル', id: -12 },
+              { name: '歌', id: 20, type: 'sing' },
+            ],
+          },
+        ]);
+      return json([
+        { speaker_uuid: 'vv-test', name: '四国めたん', styles: [{ name: 'ノーマル', id: 99 }] },
+      ]);
+    });
+    const response = await fetch(base + '/api/casting/voices');
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.engines.every((engine: { ready: boolean }) => engine.ready)).toBe(true);
+    expect(body.voices).toHaveLength(2);
+    expect(
+      body.voices.find((voice: { engine: string }) => voice.engine === 'AivisSpeech'),
+    ).toMatchObject(candidate.voice);
+    expect(JSON.stringify(body)).not.toContain('歌');
+    expect(JSON.stringify(body)).not.toContain('speaker_uuid');
+  });
+  it('keeps one engine available if the other is disconnected', async () => {
+    mockFetch.mockImplementation(async (url) => {
+      if (String(url).startsWith('http://127.0.0.1:10101')) throw new Error('offline');
+      return json([]);
+    });
+    const body = await (await fetch(base + '/api/casting/voices')).json();
+    expect(body.engines).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ engine: 'VOICEVOX', ready: true }),
+        expect.objectContaining({ engine: 'AivisSpeech', ready: false }),
+      ]),
+    );
+    expect(body.voices).toEqual([]);
+  });
+  it('synthesizes AivisSpeech with native parameters and returns generation provenance', async () => {
+    const wav = Buffer.alloc(44);
+    wav.write('RIFF');
+    wav.write('WAVE', 8);
+    mockFetch.mockImplementation(async (url) => {
+      const path = new URL(String(url)).pathname;
+      if (path === '/speakers')
+        return json([
+          { speaker_uuid: uuid, name: '検証用話者', styles: [{ name: 'ノーマル', id: -12 }] },
+        ]);
+      if (path === '/audio_query')
+        return json({
+          accent_phrases: [],
+          kana: 'unchanged',
+          outputSamplingRate: 44100,
+          outputStereo: false,
+        });
+      if (path === '/version') return json('aivis-test');
+      return new Response(wav);
+    });
+    const response = await post('/api/casting/preview', { candidate, text: '比較のセリフです。' });
+    expect(response.status).toBe(200);
+    expect(
+      JSON.parse(decodeURIComponent(response.headers.get('X-Voice-Atlas-Generation')!)),
+    ).toMatchObject({ engine: 'AivisSpeech', engineVersion: 'aivis-test', observedStyleId: -12 });
+    const call = mockFetch.mock.calls.find(([url]) => String(url).includes('/synthesis?'))!;
+    expect(String(call[0])).toContain('speaker=-12');
+    expect(JSON.parse(String(call[1]?.body))).toMatchObject({
+      tempoDynamicsScale: 0.7,
+      intonationScale: 1.2,
+      kana: '比較のセリフです。',
+      pitchScale: 0,
+    });
+  });
+  it('shares the generation lock with the existing preview API', async () => {
+    let release!: () => void;
+    let entered!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    mockFetch.mockImplementation(async () => {
+      entered();
+      await held;
+      return json([]);
+    });
+    const first = post('/api/casting/preview', { candidate, text: '比較' });
+    try {
+      await started;
+      const second = await post('/api/preview', {
+        voiceId: voices[0].id,
+        text: '比較',
+        recipe: makeRecipe(neutralProfile, voices[0]),
+      });
+      expect(second.status).toBe(429);
+    } finally {
+      release();
+    }
+    expect((await first).status).toBe(409);
+  });
+  it('rejects mixed engine parameters before upstream access', async () => {
+    const response = await post('/api/casting/preview', {
+      candidate: {
+        ...candidate,
+        recipe: { ...makeRecipe(neutralProfile, voices[0]), engine: 'VOICEVOX' },
+      },
+      text: '比較',
+    });
+    expect(response.status).toBe(400);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+});

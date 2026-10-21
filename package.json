@@ -17,7 +17,8 @@
     "test:e2e": "playwright test",
     "check": "npm test && npm run build",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "probe:aivis": "tsx server/aivis-probe.ts"
   },
   "dependencies": {
     "dotenv": "^18.0.8",

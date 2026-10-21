@@ -22,6 +22,7 @@ export default defineConfig({
       GEMINI_API_KEY: '',
       OLLAMA_BASE_URL: 'http://127.0.0.1:1',
       VOICEVOX_BASE_URL: 'http://127.0.0.1:1',
+      AIVIS_BASE_URL: 'http://127.0.0.1:1',
     },
   },
 });

@@ -11,6 +11,7 @@ export interface Config {
   geminiKey: string;
   geminiModel: string;
   voicevoxUrl: string;
+  aivisUrl?: string;
 }
 export function loopbackUrl(raw: string): string {
   const url = new URL(raw);
@@ -43,6 +44,7 @@ export function loadConfig(): Config {
     anthropicModel: process.env.ANTHROPIC_MODEL || defaultAnthropicModel,
     geminiKey: (process.env.GEMINI_API_KEY || '').trim(),
     geminiModel: process.env.GEMINI_MODEL || defaultGeminiModel,
+    aivisUrl: loopbackUrl(process.env.AIVIS_BASE_URL || 'http://127.0.0.1:10101'),
     voicevoxUrl: loopbackUrl(process.env.VOICEVOX_BASE_URL || 'http://127.0.0.1:50021'),
   };
 }
