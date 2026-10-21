@@ -4,6 +4,7 @@ import { gzipSync } from 'node:zlib';
 import sharp from 'sharp';
 import { createApp } from '../server/app';
 import { createTtsAdapter } from '../server/tts';
+import { aivisModelsPayload } from './fixtures/aivis-model-info';
 import type { Config } from '../server/config';
 import { makeRecipe } from '../shared/recommend';
 import { voices } from '../shared/catalog';
@@ -1010,5 +1011,28 @@ describe('cross-product casting API', () => {
     });
     expect(response.status).toBe(400);
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('optional AivisSpeech model information API', () => {
+  it('uses only the configured local read endpoint and strips local paths/media', async () => {
+    mockFetch.mockResolvedValue(json(aivisModelsPayload()));
+    const response = await fetch(base + '/api/casting/aivis-models?url=https://untrusted.invalid');
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.ready).toBe(true);
+    expect(body.models).toHaveLength(2);
+    expect(JSON.stringify(body)).not.toMatch(/file_path|data:image|data:audio|do-not-expose/);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockFetch.mock.calls[0][0]).toBe('http://127.0.0.1:10101/aivm_models');
+    expect(response.headers.get('cache-control')).toBe('no-store');
+  });
+  it('returns optional unavailable state for unsupported model APIs', async () => {
+    mockFetch.mockResolvedValue(new Response('private upstream failure', { status: 501 }));
+    const response = await fetch(base + '/api/casting/aivis-models');
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({ ready: false, models: [] });
+    expect(JSON.stringify(body)).not.toContain('private');
   });
 });

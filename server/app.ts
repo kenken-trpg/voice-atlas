@@ -8,6 +8,7 @@ import { analyzeCharacter, AppError, capabilities, type Fetcher } from './servic
 import { createTtsAdapter } from './tts';
 import { castingPreviewSchema } from '../shared/casting';
 import { castingInventory, castingSynthesize } from './tts/casting';
+import { getAivisModelInfo } from './tts/aivis-model-info';
 
 export function createApp(config: Config, fetcher: Fetcher = fetch) {
   const app = express();
@@ -80,6 +81,16 @@ export function createApp(config: Config, fetcher: Fetcher = fetch) {
     if (engineInfo)
       res.setHeader('X-Voice-Atlas-Engine', encodeURIComponent(JSON.stringify(engineInfo)));
     res.type('audio/wav').send(wav);
+  });
+  let pendingModelInfo: ReturnType<typeof getAivisModelInfo> | undefined;
+  app.get('/api/casting/aivis-models', async (_req, res) => {
+    pendingModelInfo ??= getAivisModelInfo(
+      config.aivisUrl || 'http://127.0.0.1:10101',
+      fetcher,
+    ).finally(() => {
+      pendingModelInfo = undefined;
+    });
+    res.json(await pendingModelInfo);
   });
   let pendingCasting: ReturnType<typeof castingInventory> | undefined;
   app.get('/api/casting/voices', async (_req, res) => {

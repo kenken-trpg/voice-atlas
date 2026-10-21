@@ -2232,3 +2232,31 @@ footer small {
 .casting-workspace .comparison-evaluation > label {
   margin-right: 1rem;
 }
+
+.aivis-model-details {
+  margin: 1rem 0;
+  padding: 0.85rem;
+  border: 1px solid var(--border, #ddd);
+  border-radius: 10px;
+  background: #fafbf7;
+  overflow-wrap: anywhere;
+}
+.aivis-model-details h4 {
+  margin: 0 0 0.6rem;
+}
+.aivis-model-details p,
+.aivis-model-details summary {
+  font-size: 0.8rem;
+  line-height: 1.7;
+}
+.aivis-model-details details {
+  margin: 0.65rem 0;
+}
+.model-license-text {
+  white-space: pre-wrap;
+  max-height: 18rem;
+  overflow: auto;
+}
+.model-info-change {
+  font-weight: 600;
+}

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { aivisRecipeSchema } from '../../shared/aivis';
 import {
   castingKey,
+  maxCastingSessionFileBytes,
+  castingRecipeFields as controls,
   castingInventorySchema,
   castingSessionSchema,
   castingEvaluationSchema,
@@ -12,18 +14,28 @@ import {
   type CastingEvaluation,
   type CastingVoice,
 } from '../../shared/casting';
-import { defaultText, recipeFields, type CharacterInput, type Profile } from '../../shared/schema';
+import { defaultText, type CharacterInput, type Profile } from '../../shared/schema';
 import { makeRecipe } from '../../shared/recommend';
 import { voices } from '../../shared/catalog';
-import { maxRecipeFileBytes } from '../../shared/saved-recipe';
 import { download, jsonRequest } from '../lib/http';
 import { pauseOtherAudio } from './ComparisonPanel';
 import { CharacterContext } from './CharacterContext';
+import { CastingEvaluationWorkbench } from './CastingEvaluationWorkbench';
+import { resumeCastingEvaluation } from '../../shared/casting-dataset';
+import {
+  aivisModelInfoResponseSchema,
+  modelInfoKey,
+  modelInfoChanged,
+  type AivisModelInfo,
+  type AivisModelInfoResponse,
+} from '../../shared/aivis-model-info';
+import { AivisModelDetails } from './AivisModelDetails';
 
 type AudioEntry = {
   key: string;
   url: string;
   generation: ReturnType<typeof generationSchema.parse> | null;
+  modelInfo?: AivisModelInfo;
 };
 const outcomeLabels = {
   a: 'Aを採用',
@@ -49,33 +61,6 @@ function initialCandidate(voice: CastingVoice, profile: Profile): CastingCandida
 function label(candidate: CastingCandidate) {
   return `${candidate.voice.engine} · ${candidate.voice.name} / ${candidate.voice.style}`;
 }
-function controls(candidate: CastingCandidate) {
-  const fields = recipeFields.map((field) =>
-    candidate.recipe.engine === 'AivisSpeech' && field.key === 'intonationScale'
-      ? {
-          ...field,
-          label: '感情表現の強さ',
-          help: '選んだスタイルの感情表現の強さです。VOICEVOXの抑揚とは異なります。ノーマルでは無視される場合があります。',
-        }
-      : candidate.recipe.engine === 'AivisSpeech' && field.key === 'pitchScale'
-        ? { ...field, help: '初期値は0です。変更すると音質が低下する場合があります。' }
-        : field,
-  );
-  return candidate.recipe.engine === 'AivisSpeech'
-    ? [
-        ...fields,
-        {
-          key: 'tempoDynamicsScale' as const,
-          label: 'テンポの緩急',
-          min: 0,
-          max: 2,
-          step: 0.01,
-          unit: '倍',
-          help: 'AivisSpeech固有の、話す速さの緩急を調整します。',
-        },
-      ]
-    : fields;
-}
 export function CastingWorkspace({
   open,
   disabled,
@@ -89,6 +74,14 @@ export function CastingWorkspace({
 }) {
   const [inventory, setInventory] = useState<CastingInventory | null>(null);
   const [checking, setChecking] = useState(false);
+  const [modelInfo, setModelInfo] = useState<AivisModelInfoResponse | null>(null);
+  const [checkingModels, setCheckingModels] = useState(false);
+  const modelRequestId = useRef(0);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [comparisonContext, setComparisonContext] = useState<{
+    profile: Profile;
+    characterInput: CharacterInput | null;
+  } | null>(null);
   const [loading, setLoading] = useState(false);
   const [candidates, setCandidates] = useState<Record<string, CastingCandidate>>({});
   const [pair, setPair] = useState<[string, string] | null>(null);
@@ -120,6 +113,7 @@ export function CastingWorkspace({
     () => () => {
       requestRef.current?.abort();
       refreshId.current++;
+      modelRequestId.current++;
       Object.values(audioRef.current).forEach((entry) => URL.revokeObjectURL(entry.url));
     },
     [],
@@ -130,6 +124,7 @@ export function CastingWorkspace({
     setAudio({});
   }
   async function refresh() {
+    void refreshModels();
     const id = ++refreshId.current;
     setChecking(true);
     setError('');
@@ -163,9 +158,40 @@ export function CastingWorkspace({
       if (id === refreshId.current) setChecking(false);
     }
   }
+  async function refreshModels() {
+    const id = ++modelRequestId.current;
+    setCheckingModels(true);
+    try {
+      const result = aivisModelInfoResponseSchema.parse(
+        await jsonRequest('/api/casting/aivis-models'),
+      );
+      if (id === modelRequestId.current) setModelInfo(result);
+    } catch {
+      if (id === modelRequestId.current) setModelInfo(null);
+    } finally {
+      if (id === modelRequestId.current) setCheckingModels(false);
+    }
+  }
+  function currentModel(candidate: CastingCandidate) {
+    if (checkingModels || candidate.voice.engine !== 'AivisSpeech') return undefined;
+    const key = modelInfoKey({
+      speakerUuid: candidate.voice.speakerUuid,
+      styleName: candidate.voice.style,
+    });
+    return modelInfo?.ready
+      ? modelInfo.models.find((info) => modelInfoKey(info) === key)
+      : undefined;
+  }
+  function withModel(candidate: CastingCandidate, info?: AivisModelInfo): CastingCandidate {
+    return {
+      voice: candidate.voice,
+      recipe: candidate.recipe,
+      ...(info ? { modelInfo: info } : {}),
+    };
+  }
   const available = new Set(inventory?.voices.map(castingKey) ?? []);
   function audioKey(candidate: CastingCandidate) {
-    return JSON.stringify([text, candidate]);
+    return JSON.stringify([text, candidate.voice, candidate.recipe]);
   }
   function getAudio(key: string) {
     const entry = audio[key];
@@ -180,8 +206,9 @@ export function CastingWorkspace({
       },
     }));
   }
-  async function generate() {
-    if (!pair || generating.current || checking || !pair.every((key) => available.has(key))) return;
+  async function generate(forceKey?: string) {
+    const ids = pair && forceKey && pair.includes(forceKey) ? [forceKey] : pair;
+    if (!ids || generating.current || checking || !ids.every((key) => available.has(key))) return;
     generating.current = true;
     setBusy(true);
     setError('');
@@ -189,15 +216,18 @@ export function CastingWorkspace({
     const controller = new AbortController();
     requestRef.current = controller;
     try {
-      for (const key of pair) {
+      for (const key of ids) {
         if (controller.signal.aborted) break;
         const candidate = candidates[key],
           cacheKey = audioKey(candidate);
-        if (audioRef.current[key]?.key === cacheKey) continue;
+        if (key !== forceKey && audioRef.current[key]?.key === cacheKey) continue;
         const response = await fetch('/api/casting/preview', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ candidate, text }),
+          body: JSON.stringify({
+            candidate: { voice: candidate.voice, recipe: candidate.recipe },
+            text,
+          }),
           signal: controller.signal,
         });
         if (!response.ok) {
@@ -218,11 +248,22 @@ export function CastingWorkspace({
         } catch {
           /* Optional provenance. */
         }
+        const capturedModelInfo = currentModel(candidate);
+        if (capturedModelInfo)
+          setCandidates((previous) => ({
+            ...previous,
+            [key]: withModel(previous[key], capturedModelInfo),
+          }));
         const old = audioRef.current[key];
         if (old) URL.revokeObjectURL(old.url);
         const next = {
           ...audioRef.current,
-          [key]: { key: cacheKey, url: URL.createObjectURL(blob), generation },
+          [key]: {
+            key: cacheKey,
+            url: URL.createObjectURL(blob),
+            generation,
+            modelInfo: capturedModelInfo,
+          },
         };
         audioRef.current = next;
         setAudio(next);
@@ -241,12 +282,12 @@ export function CastingWorkspace({
     const item = castingEvaluationSchema.parse({
       recordedAt: new Date().toISOString(),
       text,
-      candidates: pair.map((key) => candidates[key]),
+      candidates: pair.map((key) => withModel(candidates[key], getAudio(key)!.modelInfo)),
       generations: pair.map((key) => getAudio(key)!.generation),
       outcome,
       reason,
-      profile,
-      characterInput,
+      profile: comparisonContext?.profile ?? profile,
+      characterInput: comparisonContext ? comparisonContext.characterInput : characterInput,
     });
     setEvaluations((previous) => [...previous, item]);
     if (outcome === 'a' || outcome === 'b') setSelected(pair[outcome === 'a' ? 0 : 1]);
@@ -259,10 +300,13 @@ export function CastingWorkspace({
       version: 1,
       createdAt: new Date().toISOString(),
       text,
-      candidates: Object.values(candidates),
+      candidates: Object.values(candidates).map((candidate) =>
+        withModel(candidate, candidate.modelInfo ?? currentModel(candidate)),
+      ),
       comparisonKeys: pair,
       selectedKey: selected,
       evaluations,
+      comparisonContext: comparisonContext ?? { profile, characterInput },
     });
     download('voice-atlas-casting.json', JSON.stringify(saved, null, 2));
   }
@@ -270,8 +314,8 @@ export function CastingWorkspace({
     if (!file || generating.current || loading) return;
     setLoading(true);
     try {
-      if (file.size > maxRecipeFileBytes)
-        throw new Error('比較セッションJSONは4MiB以下にしてください。');
+      if (file.size > maxCastingSessionFileBytes)
+        throw new Error('比較セッションJSONは8MiB以下にしてください。');
       const saved = castingSessionSchema.parse(JSON.parse(await file.text()));
       refreshId.current++;
       setChecking(false);
@@ -283,6 +327,7 @@ export function CastingWorkspace({
       setSelected(saved.selectedKey);
       setText(saved.text);
       setEvaluations(saved.evaluations);
+      setComparisonContext(saved.comparisonContext ?? null);
       setReason('');
       setOutcome('undecided');
       setError('');
@@ -291,12 +336,33 @@ export function CastingWorkspace({
       );
     } catch {
       setError(
-        '比較セッションJSONの形式・製品・設定範囲を確認してください。現在の作業は保持しています。',
+        file.size > maxCastingSessionFileBytes
+          ? '比較セッションJSONは8MiB以下にしてください。現在の作業は保持しています。'
+          : '比較セッションJSONの形式・製品・設定範囲を確認してください。現在の作業は保持しています。',
       );
     } finally {
       if (fileRef.current) fileRef.current.value = '';
       setLoading(false);
     }
+  }
+  function resume(item: CastingEvaluation) {
+    if (disabled || generating.current || loading)
+      throw new Error('処理が完了してから比較を再開してください。');
+    const next = resumeCastingEvaluation(candidates, item);
+    refreshId.current++;
+    setChecking(false);
+    clearAudio();
+    setCandidates(next.candidates);
+    setPair(next.pair);
+    setSelected(next.selected);
+    setText(next.text);
+    setComparisonContext(next.context);
+    setOutcome('undecided');
+    setReason('');
+    setError('');
+    setNotice(
+      '採用した声と当時の比較条件を戻しました。音声は再生成してください。過去の評価は保持しています。',
+    );
   }
   const locked = disabled || busy || loading;
   return (
@@ -322,6 +388,13 @@ export function CastingWorkspace({
           onClick={() => void refresh()}
         >
           比較用の接続を再確認
+        </button>
+        <button
+          className="secondary-button"
+          disabled={locked || checkingModels}
+          onClick={() => void refreshModels()}
+        >
+          モデル・利用条件を再確認
         </button>
         <button
           className="secondary-button"
@@ -419,6 +492,13 @@ export function CastingWorkspace({
                           ? '未導入'
                           : '未接続'}
                   </p>
+                  {candidate.voice.engine === 'AivisSpeech' && (
+                    <AivisModelDetails
+                      current={currentModel(candidate)}
+                      saved={candidate.modelInfo}
+                      checking={checkingModels}
+                    />
+                  )}
                   <div className="recipe-sliders">
                     {controls(candidate).map((field) => (
                       <div className="recipe-control" key={field.key}>
@@ -456,6 +536,29 @@ export function CastingWorkspace({
                         aria-label={`製品比較候補${letter}の試聴`}
                         onPlay={pauseOtherAudio}
                       />
+                      {candidate.voice.engine === 'AivisSpeech' && (
+                        <>
+                          <p>この試聴音声のモデル版：{entry.modelInfo?.modelVersion ?? '未取得'}</p>
+                          {entry.modelInfo &&
+                            currentModel(candidate) &&
+                            modelInfoChanged(entry.modelInfo, currentModel(candidate)!) && (
+                              <p role="status">
+                                現在のモデル情報は音声生成時の確認情報と異なります。試聴音声は生成済みのものを再利用しています。
+                              </p>
+                            )}
+                          <details>
+                            <summary>試聴音声に対応するモデル情報を見る</summary>
+                            <AivisModelDetails historical saved={entry.modelInfo} />
+                          </details>
+                        </>
+                      )}
+                      <button
+                        className="secondary-button"
+                        disabled={locked || checking || !available.has(key) || !text.trim()}
+                        onClick={() => void generate(key)}
+                      >
+                        候補{letter}の音声を再生成
+                      </button>
                       <a
                         href={entry.url}
                         download={`voice-atlas-${candidate.voice.engine}-${letter}.wav`}
@@ -525,6 +628,36 @@ export function CastingWorkspace({
           </fieldset>
         </>
       )}
+      {comparisonContext && (
+        <div className="recipe-notice">
+          <p>
+            再開・復元した比較の4軸とキャラクター設定を、次の評価にも記録します。上の入力欄の設定は変更しません。
+          </p>
+          <CharacterContext input={comparisonContext.characterInput ?? undefined} />
+          <button
+            className="text-button"
+            disabled={locked}
+            onClick={() => setComparisonContext(null)}
+          >
+            現在の声の方向を次の評価に使う
+          </button>
+        </div>
+      )}
+      <button
+        className="secondary-button"
+        aria-expanded={historyOpen}
+        aria-controls="casting-evaluation-workbench"
+        onClick={() => setHistoryOpen(!historyOpen)}
+      >
+        {historyOpen ? '製品比較の履歴集計を閉じる' : '製品比較の履歴を集計する'}
+      </button>
+      <div id="casting-evaluation-workbench" hidden={!historyOpen}>
+        <CastingEvaluationWorkbench
+          currentEvaluations={evaluations}
+          disabled={locked}
+          onResume={resume}
+        />
+      </div>
       <p role="status">製品比較の評価記録：{evaluations.length}件 / 100件</p>
       {evaluations.length > 0 && (
         <details>
@@ -566,6 +699,11 @@ export function CastingWorkspace({
                     </div>
                   ))}
                 </details>
+                {item.candidates
+                  .filter((candidate) => candidate.voice.engine === 'AivisSpeech')
+                  .map((candidate, index) => (
+                    <AivisModelDetails key={index} historical saved={candidate.modelInfo} />
+                  ))}
                 <CharacterContext input={item.characterInput ?? undefined} />
                 <small>{new Date(item.recordedAt).toLocaleString('ja-JP')}</small>
               </li>
