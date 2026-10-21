@@ -8,6 +8,8 @@ import {
   type Voice,
 } from './schema';
 import { voices } from './catalog';
+// Bump when scoring, tie-breaking or recipe derivation changes.
+export const recommendationRevision = 'rmse-four-axes-v1';
 const round = (value: number) => Math.round(value * 100) / 100;
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 

@@ -115,6 +115,15 @@ describe('local evaluation datasets', () => {
       total: 6,
       outcomes: { a: 3, b: 1, tie: 1, undecided: 1 },
       relations: { higher: 1, lower: 1, equal: 1, tie: 1, undecided: 1, unavailable: 1 },
+      recordedRelations: {
+        higher: 0,
+        lower: 0,
+        equal: 0,
+        tie: 0,
+        undecided: 0,
+        unavailable: 0,
+        unrecorded: 6,
+      },
     });
     const before = analyzeEvaluation(evaluation());
     const tuned = evaluation();

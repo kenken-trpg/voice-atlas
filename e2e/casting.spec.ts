@@ -54,7 +54,19 @@ test('compares sequentially, retains per-candidate settings, records conditions 
   await page.route('**/api/preview', async (route) => {
     requests.push(route.request().postDataJSON());
     if (requests.length === 1) await firstGate;
-    await route.fulfill({ contentType: 'audio/wav', body: wav() });
+    await route.fulfill({
+      contentType: 'audio/wav',
+      body: wav(),
+      headers: {
+        'X-Voice-Atlas-Engine': encodeURIComponent(
+          JSON.stringify({
+            engine: 'VOICEVOX',
+            version: `test-engine-${requests.length}`,
+            checkedAt: '2026-10-21T00:00:00Z',
+          }),
+        ),
+      },
+    });
   });
   await page.goto('/');
   await page.getByRole('button', { name: '凛と、落ち着いて' }).click();
@@ -102,6 +114,9 @@ test('compares sequentially, retains per-candidate settings, records conditions 
   await panel.getByRole('button', { name: 'A・Bの比較音声を生成' }).click();
   await expect(panel.locator('audio')).toHaveCount(2);
   expect(requests).toHaveLength(3); // B remains valid; only A needs regeneration.
+  await panel.getByRole('radio', { name: 'Aを採用' }).check();
+  await panel.getByLabel('選択理由（任意・1000文字まで）').fill('再調整後も採用する。');
+  await panel.getByRole('button', { name: '評価を記録' }).click();
   const downloadEvent = page.waitForEvent('download');
   await page.getByRole('button', { name: 'レシピをJSONで保存' }).click();
   const downloaded = await downloadEvent;
@@ -109,12 +124,23 @@ test('compares sequentially, retains per-candidate settings, records conditions 
   for await (const chunk of await downloaded.createReadStream()) chunks.push(Buffer.from(chunk));
   const buffer = Buffer.concat(chunks);
   const saved = JSON.parse(buffer.toString());
-  expect(saved.version).toBe(2);
+  expect(saved.version).toBe(3);
   expect(saved.voice.id).toBe('vv-ryusei');
   expect(saved.parameters.speedScale).toBe(0.89);
   expect(saved.evaluations[0].candidates[0].parameters.speedScale).toBe(0.88);
   expect(saved.evaluations[0].reason).toBe('落ち着いた低音が役柄に合う。');
   expect(saved.image).toBeUndefined();
+  expect(
+    saved.evaluations[0].evidence.candidates.map((item: { voiceId: string }) => item.voiceId),
+  ).toEqual(['vv-ryusei', 'vv-metan']);
+  expect(saved.evaluations[0].evidence.rankingScope).toBe('voicevox-all');
+  expect(saved.evaluations[0].evidence.candidateCount).toBe(20);
+  expect(
+    saved.evaluations[0].evidence.engines.map((info: { version: string }) => info.version),
+  ).toEqual(['test-engine-1', 'test-engine-2']);
+  expect(
+    saved.evaluations[1].evidence.engines.map((info: { version: string }) => info.version),
+  ).toEqual(['test-engine-3', 'test-engine-2']);
   await page.reload();
   await page
     .getByLabel('レシピJSONファイル')
@@ -128,6 +154,11 @@ test('compares sequentially, retains per-candidate settings, records conditions 
   await expect(panel.locator('audio')).toHaveCount(0);
   await panel.getByText('記録した評価を見る').click();
   await expect(panel.getByText('理由：落ち着いた低音が役柄に合う。')).toBeVisible();
+  await expect(panel.getByText(/候補Aのエンジン情報：VOICEVOX test-engine-1/)).toBeVisible();
+  await page.getByRole('button', { name: '評価記録をまとめる' }).click();
+  await aggregate.getByRole('button', { name: '現在の比較記録を追加（2件）' }).click();
+  await expect(aggregate.locator('.evaluation-records > li')).toHaveCount(2);
+  await page.getByRole('button', { name: '評価記録の集計を閉じる' }).click();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );

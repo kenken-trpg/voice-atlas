@@ -37,6 +37,11 @@ import { catalogReviewedAt, voices } from '../shared/catalog';
 import { recommend } from '../shared/recommend';
 import { voiceAvailability, type VoiceAvailability } from '../shared/voicevox';
 import { parseSavedRecipe, type Evaluation } from '../shared/saved-recipe';
+import {
+  captureEvaluationEvidence,
+  engineInfoSchema,
+  type EngineInfo,
+} from '../shared/evaluation-evidence';
 import { ComparisonPanel, pauseOtherAudio } from './components/ComparisonPanel';
 import { EvaluationWorkbench } from './components/EvaluationWorkbench';
 import { HelpTip } from './components/HelpTip';
@@ -104,7 +109,9 @@ function App() {
   const [busy, setBusy] = useState<'analysis' | 'audio' | null>(null);
   const [loadingImage, setLoadingImage] = useState(false);
   const [error, setError] = useState('');
-  const [audioCache, setAudioCache] = useState<Record<string, { key: string; url: string }>>({});
+  const [audioCache, setAudioCache] = useState<
+    Record<string, { key: string; url: string; engineInfo: EngineInfo | null }>
+  >({});
   const audioCacheRef = useRef(audioCache);
   const generatingRef = useRef(false);
   const [dragging, setDragging] = useState(false);
@@ -314,11 +321,21 @@ function App() {
         }
         const blob = await response.blob();
         if (controller.signal.aborted) break;
+        let engineInfo: EngineInfo | null = null;
+        try {
+          const header = response.headers.get('X-Voice-Atlas-Engine');
+          const parsed = engineInfoSchema.safeParse(
+            header ? JSON.parse(decodeURIComponent(header)) : null,
+          );
+          if (parsed.success) engineInfo = parsed.data;
+        } catch {
+          /* Missing or malformed optional metadata does not invalidate audio. */
+        }
         const previous = audioCacheRef.current[id];
         if (previous) URL.revokeObjectURL(previous.url);
         audioCacheRef.current = {
           ...audioCacheRef.current,
-          [id]: { key, url: URL.createObjectURL(blob) },
+          [id]: { key, url: URL.createObjectURL(blob), engineInfo },
         };
         setAudioCache(audioCacheRef.current);
       }
@@ -340,7 +357,7 @@ function App() {
       JSON.stringify(
         {
           format: 'voice-atlas-recipe',
-          version: 2,
+          version: 3,
           createdAt: new Date().toISOString(),
           source,
           manuallyAdjusted: edited,
@@ -392,6 +409,14 @@ function App() {
       })) as Evaluation['candidates'],
       outcome,
       reason,
+      evidence: captureEvaluationEvidence(
+        profile,
+        comparisonIds,
+        comparisonIds.map((id) => audioCache[id]?.engineInfo ?? null) as [
+          EngineInfo | null,
+          EngineInfo | null,
+        ],
+      ),
     };
     setEvaluations((current) => [...current, evaluation]);
     if (outcome === 'a' || outcome === 'b') {
@@ -416,7 +441,7 @@ function App() {
       }
       const saved = parseSavedRecipe(input);
       const restored: Record<string, Recipe> = {};
-      if (saved.version === 2)
+      if (saved.version !== 1)
         saved.candidates.forEach((item) => {
           restored[item.voiceId] = item.parameters;
         });
@@ -425,7 +450,7 @@ function App() {
       setRecipes(restored);
       setProfile(saved.profile);
       const restoredPreferences =
-        saved.version === 2
+        saved.version !== 1
           ? saved.preferences
           : { engine: 'all' as const, budget: 'all' as const };
       const selectedVisible = recommend(saved.profile, restoredPreferences).some(
@@ -437,8 +462,8 @@ function App() {
       setText(saved.sampleText);
       setSource(saved.source);
       setEdited(saved.manuallyAdjusted);
-      setComparisonIds(saved.version === 2 ? saved.comparisonIds : null);
-      setEvaluations(saved.version === 2 ? saved.evaluations : []);
+      setComparisonIds(saved.version !== 1 ? saved.comparisonIds : null);
+      setEvaluations(saved.version !== 1 ? saved.evaluations : []);
       ++imageGeneration.current;
       setImage(null);
       setAnalysis(null);

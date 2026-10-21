@@ -1,6 +1,7 @@
 import { z } from 'zod';
-import { catalogReviewedAt, voices } from './catalog';
-import { recommend } from './recommend';
+import { catalogReviewedAt, catalogRevision, voices } from './catalog';
+import { recommendationRevision } from './recommend';
+import { voicevoxRanking } from './evaluation-evidence';
 import { evaluationSchema, type Evaluation } from './saved-recipe';
 import { axes, recipeFields } from './schema';
 
@@ -26,7 +27,7 @@ const recordSchema = z.object({
 export type EvaluationRecord = z.infer<typeof recordSchema>;
 const datasetSchema = z.object({
   format: z.literal('voice-atlas-evaluations'),
-  version: z.literal(1),
+  version: z.union([z.literal(1), z.literal(2)]),
   createdAt: z.iso.datetime(),
   records: z.array(recordSchema).max(maxEvaluationRecords),
 });
@@ -34,7 +35,7 @@ const recipeHistorySchema = z.discriminatedUnion('version', [
   z.object({ format: z.literal('voice-atlas-recipe'), version: z.literal(1) }),
   z.object({
     format: z.literal('voice-atlas-recipe'),
-    version: z.literal(2),
+    version: z.union([z.literal(2), z.literal(3)]),
     catalogReviewedAt: z.iso.date(),
     evaluations: z.array(historicalEvaluationSchema).max(100),
   }),
@@ -56,7 +57,9 @@ export function parseEvaluationFile(input: unknown): EvaluationRecord[] {
   // historic IDs may remain useful after a voice is removed from today's catalog.
   const result = recipeHistorySchema.safeParse(input);
   if (!result.success)
-    throw new Error('評価履歴を含むレシピJSON（v2）または評価JSON（v1）を指定してください。');
+    throw new Error(
+      '評価履歴を含むレシピJSON（v2・v3）または評価JSON（v1・v2）を指定してください。',
+    );
   const saved = result.data;
   if (saved.version === 1) return [];
   return saved.evaluations.map((evaluation) => ({
@@ -69,6 +72,11 @@ export function evaluationKey(evaluation: Evaluation) {
   // Parse again to canonicalize property order and strip unknown fields. A/B
   // order, the exact text, reason and tuning remain part of the experiment.
   const normalized = historicalEvaluationSchema.parse(evaluation);
+  if (normalized.evidence) {
+    normalized.evidence.engines.forEach((engine) => {
+      if (engine) engine.checkedAt = new Date(engine.checkedAt).toISOString();
+    });
+  }
   return JSON.stringify({
     ...normalized,
     recordedAt: new Date(normalized.recordedAt).toISOString(),
@@ -107,7 +115,7 @@ export function mergeEvaluationRecords(existing: EvaluationRecord[], incoming: E
 export function makeEvaluationDataset(records: EvaluationRecord[]) {
   return datasetSchema.parse({
     format: 'voice-atlas-evaluations',
-    version: 1,
+    version: 2,
     createdAt: new Date().toISOString(),
     records,
   });
@@ -122,20 +130,41 @@ export const relationLabels = {
   unavailable: 'カタログ未収録',
 };
 export type ScoreRelation = keyof typeof relationLabels;
+export const recordedRelationLabels = { ...relationLabels, unrecorded: '評価時の記録なし' };
+export type RecordedScoreRelation = keyof typeof recordedRelationLabels;
+
+function scoreRelation(
+  evaluation: Evaluation,
+  scores: [number | null, number | null],
+): ScoreRelation {
+  if (evaluation.outcome === 'tie' || evaluation.outcome === 'undecided') return evaluation.outcome;
+  if (scores[0] === null || scores[1] === null) return 'unavailable';
+  const difference = evaluation.outcome === 'a' ? scores[0] - scores[1] : scores[1] - scores[0];
+  return difference === 0 ? 'equal' : difference > 0 ? 'higher' : 'lower';
+}
 export function analyzeEvaluation(evaluation: Evaluation) {
-  const ranked = recommend(evaluation.profile, { engine: 'all', budget: 'all' });
+  const ranked = voicevoxRanking(evaluation.profile);
   const scores = evaluation.candidates.map(
     (candidate) => ranked.find((item) => item.voice.id === candidate.voiceId)?.score ?? null,
   ) as [number | null, number | null];
-  let relation: ScoreRelation;
-  if (evaluation.outcome === 'tie' || evaluation.outcome === 'undecided')
-    relation = evaluation.outcome;
-  else if (scores[0] === null || scores[1] === null) relation = 'unavailable';
-  else {
-    const difference = evaluation.outcome === 'a' ? scores[0] - scores[1] : scores[1] - scores[0];
-    relation = difference === 0 ? 'equal' : difference > 0 ? 'higher' : 'lower';
-  }
-  return { scores, relation };
+  const ranks = evaluation.candidates.map((candidate) => {
+    const index = ranked.findIndex((item) => item.voice.id === candidate.voiceId);
+    return index < 0 ? null : index + 1;
+  });
+  const recordedScores = evaluation.evidence?.candidates.map((candidate) => candidate.score) as
+    [number, number] | undefined;
+  return {
+    scores,
+    ranks,
+    candidateCount: ranked.length,
+    relation: scoreRelation(evaluation, scores),
+    recordedRelation: recordedScores
+      ? scoreRelation(evaluation, recordedScores)
+      : ('unrecorded' as RecordedScoreRelation),
+    scoreDeltas: scores.map((score, index) =>
+      score !== null && recordedScores ? score - recordedScores[index] : null,
+    ),
+  };
 }
 
 export function summarizeEvaluations(records: EvaluationRecord[]) {
@@ -148,11 +177,14 @@ export function summarizeEvaluations(records: EvaluationRecord[]) {
     undecided: 0,
     unavailable: 0,
   };
+  const recordedRelations: Record<RecordedScoreRelation, number> = { ...relations, unrecorded: 0 };
   for (const record of records) {
+    const analysis = analyzeEvaluation(record.evaluation);
     outcomes[record.evaluation.outcome]++;
-    relations[analyzeEvaluation(record.evaluation).relation]++;
+    relations[analysis.relation]++;
+    recordedRelations[analysis.recordedRelation]++;
   }
-  return { total: records.length, outcomes, relations };
+  return { total: records.length, outcomes, relations, recordedRelations };
 }
 
 export function evaluationVoiceLabel(id: string) {
@@ -187,6 +219,28 @@ export function evaluationsCsv(records: EvaluationRecord[]) {
     'current_score_a',
     'current_score_b',
     'current_score_relation',
+    'current_algorithm_revision',
+    'current_catalog_revision',
+    'current_rank_a',
+    'current_rank_b',
+    'current_candidate_count',
+    'recorded_algorithm_revision',
+    'recorded_catalog_revision',
+    'recorded_catalog_reviewed_at',
+    'recorded_ranking_scope',
+    'recorded_candidate_count',
+    'recorded_score_a',
+    'recorded_score_b',
+    'recorded_rank_a',
+    'recorded_rank_b',
+    'recorded_score_relation',
+    'score_delta_a',
+    'score_delta_b',
+    ...['a', 'b'].flatMap((label) => [
+      `${label}_engine`,
+      `${label}_engine_version`,
+      `${label}_engine_checked_at`,
+    ]),
   ];
   const rows = records.map(({ evaluation, sourceCatalogDates }) => {
     const analysis = analyzeEvaluation(evaluation);
@@ -205,6 +259,24 @@ export function evaluationsCsv(records: EvaluationRecord[]) {
       catalogReviewedAt,
       ...analysis.scores,
       relationLabels[analysis.relation],
+      recommendationRevision,
+      catalogRevision,
+      ...analysis.ranks,
+      analysis.candidateCount,
+      evaluation.evidence?.algorithmRevision ?? null,
+      evaluation.evidence?.catalogRevision ?? null,
+      evaluation.evidence?.catalogReviewedAt ?? null,
+      evaluation.evidence?.rankingScope ?? null,
+      evaluation.evidence?.candidateCount ?? null,
+      ...(evaluation.evidence?.candidates.map((candidate) => candidate.score) ?? [null, null]),
+      ...(evaluation.evidence?.candidates.map((candidate) => candidate.rank) ?? [null, null]),
+      recordedRelationLabels[analysis.recordedRelation],
+      ...analysis.scoreDeltas,
+      ...(evaluation.evidence?.engines ?? [null, null]).flatMap((engine) => [
+        engine?.engine ?? null,
+        engine?.version ?? null,
+        engine?.checkedAt ?? null,
+      ]),
     ];
   });
   return (

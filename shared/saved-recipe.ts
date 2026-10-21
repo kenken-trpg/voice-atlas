@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { voices } from './catalog';
+import { evaluationEvidenceSchema } from './evaluation-evidence';
 import {
   engineSchema,
   preferencesSchema,
@@ -11,14 +12,24 @@ import {
 
 const voiceId = z.string().min(1).max(100);
 const candidateSchema = z.object({ voiceId, parameters: recipeSchema });
-export const evaluationSchema = z.object({
-  recordedAt: z.iso.datetime(),
-  profile: profileSchema,
-  sampleText: z.string().min(1).max(300),
-  candidates: z.tuple([candidateSchema, candidateSchema]),
-  outcome: z.enum(['a', 'b', 'tie', 'undecided']),
-  reason: z.string().max(1000),
-});
+export const evaluationSchema = z
+  .object({
+    recordedAt: z.iso.datetime(),
+    profile: profileSchema,
+    sampleText: z.string().min(1).max(300),
+    candidates: z.tuple([candidateSchema, candidateSchema]),
+    outcome: z.enum(['a', 'b', 'tie', 'undecided']),
+    reason: z.string().max(1000),
+    evidence: evaluationEvidenceSchema.optional(),
+  })
+  .refine(
+    (item) =>
+      !item.evidence ||
+      item.candidates.every(
+        (candidate, index) => candidate.voiceId === item.evidence!.candidates[index].voiceId,
+      ),
+    { message: '評価と推薦記録の候補が一致しません。' },
+  );
 export type Evaluation = z.infer<typeof evaluationSchema>;
 const base = {
   format: z.literal('voice-atlas-recipe'),
@@ -31,16 +42,20 @@ const base = {
   sampleText: z.string().max(300),
   catalogReviewedAt: z.string().max(40),
 };
+const sessionFields = {
+  preferences: preferencesSchema,
+  candidates: z.array(candidateSchema).max(100),
+  comparisonIds: z.tuple([voiceId, voiceId]).nullable(),
+  evaluations: z.array(evaluationSchema).max(100),
+};
 const savedRecipeSchema = z.discriminatedUnion('version', [
   z.object({ ...base, version: z.literal(1) }),
   z.object({
     ...base,
     version: z.literal(2),
-    preferences: preferencesSchema,
-    candidates: z.array(candidateSchema).max(100),
-    comparisonIds: z.tuple([voiceId, voiceId]).nullable(),
-    evaluations: z.array(evaluationSchema).max(100),
+    ...sessionFields,
   }),
+  z.object({ ...base, ...sessionFields, version: z.literal(3) }),
 ]);
 
 // Import only known catalog identities and validated numbers. URLs, guides and credits
@@ -53,9 +68,10 @@ export function parseSavedRecipe(input: unknown) {
     input.format === 'voice-atlas-recipe' &&
     'version' in input &&
     input.version !== 1 &&
-    input.version !== 2
+    input.version !== 2 &&
+    input.version !== 3
   ) {
-    throw new Error('このJSONのバージョンには対応していません。対応バージョンは1・2です。');
+    throw new Error('このJSONのバージョンには対応していません。対応バージョンは1・2・3です。');
   }
   const result = savedRecipeSchema.safeParse(input);
   if (!result.success) throw new Error('Voice Atlasのレシピ形式・設定範囲を確認してください。');
@@ -86,7 +102,7 @@ export function parseSavedRecipe(input: unknown) {
         throw new Error('比較にはVOICEVOXの話者を指定してください。');
     });
   };
-  if (saved.version === 2) {
+  if (saved.version !== 1) {
     saved.candidates.forEach(checkCandidate);
     if (new Set(saved.candidates.map((item) => item.voiceId)).size !== saved.candidates.length)
       throw new Error('候補の設定が重複しています。');

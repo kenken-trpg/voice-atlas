@@ -13,8 +13,27 @@ import type { Config } from './config';
 import { analysisSchemas } from './analysis-schemas';
 import { voices } from '../shared/catalog';
 import { findVoicevoxStyle } from '../shared/voicevox';
+import { engineInfoSchema, type EngineInfo } from '../shared/evaluation-evidence';
 import { AppError, remoteJson, remoteBytes, maxWavBytes, type Fetcher } from './remote';
 export { AppError, type Fetcher } from './remote';
+
+// Optional provenance: failure must not turn successfully generated audio into an error.
+export async function getEngineInfo(
+  config: Config,
+  fetcher: Fetcher = fetch,
+): Promise<EngineInfo | null> {
+  try {
+    const bytes = await remoteBytes(`${config.voicevoxUrl}/version`, {}, 1000, fetcher, 1024);
+    const result = engineInfoSchema.safeParse({
+      engine: 'VOICEVOX',
+      version: JSON.parse(bytes.toString('utf8')),
+      checkedAt: new Date().toISOString(),
+    });
+    return result.success ? result.data : null;
+  } catch {
+    return null;
+  }
+}
 
 const speakerSchema = z.array(
   z.object({

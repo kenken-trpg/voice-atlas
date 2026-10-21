@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
-import { catalogReviewedAt } from '../../shared/catalog';
+import { catalogReviewedAt, catalogRevision } from '../../shared/catalog';
+import { recommendationRevision } from '../../shared/recommend';
 import {
   analyzeEvaluation,
   evaluationVoiceLabel,
@@ -13,13 +14,16 @@ import {
   outcomeLabels,
   parseEvaluationFile,
   relationLabels,
+  recordedRelationLabels,
   summarizeEvaluations,
   type EvaluationRecord,
   type ScoreRelation,
+  type RecordedScoreRelation,
 } from '../../shared/evaluation-dataset';
 import type { Evaluation } from '../../shared/saved-recipe';
 import { axes, axisLabels, recipeFields } from '../../shared/schema';
 import { download } from '../lib/http';
+import { EvaluationProvenance } from './EvaluationProvenance';
 
 const pageSize = 25;
 export function EvaluationWorkbench({ currentEvaluations }: { currentEvaluations: Evaluation[] }) {
@@ -29,6 +33,8 @@ export function EvaluationWorkbench({ currentEvaluations }: { currentEvaluations
   const [error, setError] = useState('');
   const [outcome, setOutcome] = useState<'all' | Evaluation['outcome']>('all');
   const [relation, setRelation] = useState<'all' | ScoreRelation>('all');
+  const [recordedRelation, setRecordedRelation] = useState<'all' | RecordedScoreRelation>('all');
+  const [revision, setRevision] = useState('all');
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -38,6 +44,19 @@ export function EvaluationWorkbench({ currentEvaluations }: { currentEvaluations
     [records],
   );
   const summary = useMemo(() => summarizeEvaluations(records), [records]);
+  function revisionKey(evaluation: Evaluation) {
+    return evaluation.evidence
+      ? JSON.stringify([evaluation.evidence.algorithmRevision, evaluation.evidence.catalogRevision])
+      : 'unrecorded';
+  }
+  const revisionGroups = [...new Set(records.map(({ evaluation }) => revisionKey(evaluation)))].map(
+    (key) => ({
+      key,
+      label:
+        key === 'unrecorded' ? '記録なし（旧記録）' : (JSON.parse(key) as string[]).join(' / '),
+      count: records.filter(({ evaluation }) => revisionKey(evaluation) === key).length,
+    }),
+  );
   const filtered = analyzed.filter(({ evaluation, analysis }) => {
     const haystack = [
       evaluation.reason,
@@ -49,6 +68,8 @@ export function EvaluationWorkbench({ currentEvaluations }: { currentEvaluations
     return (
       (outcome === 'all' || evaluation.outcome === outcome) &&
       (relation === 'all' || analysis.relation === relation) &&
+      (recordedRelation === 'all' || analysis.recordedRelation === recordedRelation) &&
+      (revision === 'all' || revisionKey(evaluation) === revision) &&
       haystack.includes(query.trim().toLocaleLowerCase())
     );
   });
@@ -153,6 +174,7 @@ export function EvaluationWorkbench({ currentEvaluations }: { currentEvaluations
             setError('');
             setMessage('集計をクリアしました。');
             setPage(0);
+            setRevision('all');
           }}
         >
           集計をクリア
@@ -174,14 +196,34 @@ export function EvaluationWorkbench({ currentEvaluations }: { currentEvaluations
           {summary.outcomes.tie}件 ／ 判断できない：{summary.outcomes.undecided}件
         </p>
         <p>
-          高スコアを採用：{summary.relations.higher}件 ／ 低スコアを採用：{summary.relations.lower}
-          件 ／ スコア同点を採用：{summary.relations.equal}件 ／ 比較できない採用記録：
+          現行スコアとの関係 — 高スコアを採用：{summary.relations.higher}件 ／ 低スコアを採用：
+          {summary.relations.lower}件 ／ スコア同点を採用：{summary.relations.equal}件 ／
+          比較できない採用記録：
           {summary.relations.unavailable}件
         </p>
+        <p>
+          評価時スコアとの関係 — 高スコアを採用：{summary.recordedRelations.higher}件 ／
+          低スコアを採用：{summary.recordedRelations.lower}件 ／ スコア同点を採用：
+          {summary.recordedRelations.equal}件 ／ 評価時の記録なし：
+          {summary.recordedRelations.unrecorded}件
+        </p>
+        {revisionGroups.length > 0 && (
+          <details>
+            <summary>評価時の版別の件数</summary>
+            <ul>
+              {revisionGroups.map((group) => (
+                <li key={group.key}>
+                  {group.label}：{group.count}件
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
       </div>
       <p className="footnote">
-        スコアは現在のカタログ（確認日：{catalogReviewedAt}
-        ）と推薦式で再計算した4軸の目安です。評価時のスコアではなく、調声値の効果も含みません。同程度・判断できない記録は高低の集計から除きます。未収録の話者はIDで表示し、スコアを補いません。
+        現行スコアは現在のカタログ（{catalogRevision}・確認日：{catalogReviewedAt}）と推薦式（
+        {recommendationRevision}
+        ）で再計算します。評価時スコアは保存した値を表示し、旧記録には補いません。順位はVOICEVOX全候補内で、利用可否・画面の絞り込みを適用しません。同点の順位差を採用スコアの高低に数えず、同程度・判断できない記録も高低の集計から除きます。調声値の効果はスコアに含みません。
       </p>
       <div className="evaluation-filters">
         <label>
@@ -216,6 +258,42 @@ export function EvaluationWorkbench({ currentEvaluations }: { currentEvaluations
             {Object.entries(relationLabels).map(([value, label]) => (
               <option key={value} value={value}>
                 {label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          評価時スコアとの関係
+          <select
+            value={recordedRelation}
+            disabled={loading}
+            onChange={(e) => {
+              setRecordedRelation(e.target.value as typeof recordedRelation);
+              setPage(0);
+            }}
+          >
+            <option value="all">すべての関係</option>
+            {Object.entries(recordedRelationLabels).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          評価時の版で絞り込む
+          <select
+            value={revision}
+            disabled={loading}
+            onChange={(e) => {
+              setRevision(e.target.value);
+              setPage(0);
+            }}
+          >
+            <option value="all">すべての版</option>
+            {revisionGroups.map((group) => (
+              <option key={group.key} value={group.key}>
+                {group.label}（{group.count}件）
               </option>
             ))}
           </select>
@@ -278,16 +356,43 @@ export function EvaluationWorkbench({ currentEvaluations }: { currentEvaluations
             <article>
               <h3>
                 {outcomeLabels[evaluation.outcome]}{' '}
-                <small>／ {relationLabels[analysis.relation]}</small>
+                <small>
+                  ／ 現行：{relationLabels[analysis.relation]} ／ 評価時：
+                  {recordedRelationLabels[analysis.recordedRelation]}
+                </small>
               </h3>
-              <p>
-                A：{evaluationVoiceLabel(evaluation.candidates[0].voiceId)} ／ スコア：
-                {analysis.scores[0] ?? '未収録'}
-              </p>
-              <p>
-                B：{evaluationVoiceLabel(evaluation.candidates[1].voiceId)} ／ スコア：
-                {analysis.scores[1] ?? '未収録'}
-              </p>
+              <p>現行：VOICEVOX全{analysis.candidateCount}候補</p>
+              {evaluation.candidates.map((candidate, candidateIndex) => (
+                <div className="evaluation-score-comparison" key={candidate.voiceId}>
+                  <strong>
+                    {candidateIndex === 0 ? 'A' : 'B'}：{evaluationVoiceLabel(candidate.voiceId)}
+                  </strong>
+                  <p>
+                    評価時スコア：
+                    {evaluation.evidence
+                      ? `${evaluation.evidence.candidates[candidateIndex].score}（${evaluation.evidence.candidates[candidateIndex].rank}位 / ${evaluation.evidence.candidateCount}候補）`
+                      : '記録なし'}
+                  </p>
+                  <p>
+                    現行スコア：
+                    {analysis.scores[candidateIndex] === null
+                      ? '未収録'
+                      : `${analysis.scores[candidateIndex]}（${analysis.ranks[candidateIndex]}位 / ${analysis.candidateCount}候補）`}
+                    {analysis.scoreDeltas[candidateIndex] !== null && (
+                      <>
+                        {' '}
+                        ／ 差：{analysis.scoreDeltas[candidateIndex]! > 0 ? '+' : ''}
+                        {analysis.scoreDeltas[candidateIndex]}
+                      </>
+                    )}
+                  </p>
+                </div>
+              ))}
+              {evaluation.evidence &&
+                (evaluation.evidence.algorithmRevision !== recommendationRevision ||
+                  evaluation.evidence.catalogRevision !== catalogRevision) && (
+                  <p className="footnote">評価時と現在の推薦・カタログの版が異なります。</p>
+                )}
               <p className="evaluation-text">セリフ：{evaluation.sampleText}</p>
               <p className="evaluation-text">理由：{evaluation.reason || '記入なし'}</p>
               <small>評価日時：{new Date(evaluation.recordedAt).toLocaleString('ja-JP')}</small>
@@ -327,6 +432,7 @@ export function EvaluationWorkbench({ currentEvaluations }: { currentEvaluations
                   取り込み元のカタログ確認日：{sourceCatalogDates.join(' ／ ') || '記録なし'}
                   。評価時に使ったカタログや推薦式のバージョンを特定する情報ではありません。
                 </p>
+                <EvaluationProvenance evaluation={evaluation} />
               </details>
             </article>
           </li>

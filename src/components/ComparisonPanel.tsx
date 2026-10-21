@@ -4,6 +4,7 @@ import type { Recipe, Voice } from '../../shared/schema';
 import { RecipeControls } from './RecipeControls';
 import { availabilityLabels, type VoiceAvailability } from '../../shared/voicevox';
 import { AvailabilityBadge, AvailabilityHelp } from './AvailabilityBadge';
+import { EvaluationProvenance } from './EvaluationProvenance';
 
 export function pauseOtherAudio(event: React.SyntheticEvent<HTMLAudioElement>) {
   document.querySelectorAll('audio').forEach((audio) => {
@@ -194,6 +195,9 @@ export function ComparisonPanel({
         <p className="footnote">両候補の現在の音声を生成してから評価を記録できます。</p>
       )}
       <p role="status">評価記録：{evaluations.length}件 / 100件</p>
+      <p className="footnote">
+        新しい評価には評価時のスコア・VOICEVOX全候補内の順位・推薦とカタログの版を記録します。
+      </p>
       {evaluations.length >= 100 && <p>記録の上限です。JSONで保存してください。</p>}
       {evaluations.length > 0 && (
         <details>
@@ -218,6 +222,17 @@ export function ComparisonPanel({
                 </p>
                 <p>セリフ：{item.sampleText}</p>
                 <p>理由：{item.reason || '記入なし'}</p>
+                <p>
+                  {item.evidence
+                    ? item.evidence.candidates
+                        .map(
+                          (candidate, index) =>
+                            `${index === 0 ? 'A' : 'B'}：評価時スコア ${candidate.score}（${candidate.rank}位 / ${item.evidence!.candidateCount}候補）`,
+                        )
+                        .join(' ／ ')
+                    : '評価時スコア：記録なし'}
+                </p>
+                <EvaluationProvenance evaluation={item} />
                 <small>{new Date(item.recordedAt).toLocaleString('ja-JP')}</small>
               </li>
             ))}

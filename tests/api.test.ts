@@ -326,6 +326,50 @@ describe('vision provider contracts (mocked, no paid requests)', () => {
   });
 });
 describe('speaker resolution and synthesis parameters', () => {
+  it.each(['0.25.0-test', null, 'malformed', 'oversized', 'offline'])(
+    'keeps optional engine provenance separate from audio success: %s',
+    async (version) => {
+      const wav = Buffer.alloc(44);
+      wav.write('RIFF', 0);
+      wav.write('WAVE', 8);
+      mockFetch.mockImplementation(async (url, init) => {
+        const path = String(url);
+        if (path.endsWith('/speakers'))
+          return json([
+            { name: '四国めたん', speaker_uuid: 'test', styles: [{ name: 'ノーマル', id: 99 }] },
+          ]);
+        if (path.includes('/audio_query?')) return json({ accent_phrases: [] });
+        if (path.endsWith('/version')) {
+          expect(path).toBe(config.voicevoxUrl + '/version');
+          expect(init?.redirect).toBe('error');
+          if (version === 'offline') throw new Error('private upstream failure');
+          if (version === 'malformed') return json({ version: '0.25.0' });
+          if (version === 'oversized') return json('x'.repeat(1025));
+          return json(version);
+        }
+        return new Response(wav, { headers: { 'Content-Type': 'audio/wav' } });
+      });
+      const response = await post('/api/preview', {
+        voiceId: 'vv-metan',
+        text: '情報付きの音声です。',
+        recipe: makeRecipe(neutralProfile, voices[0]),
+      });
+      expect(response.status).toBe(200);
+      expect(Buffer.from(await response.arrayBuffer())).toEqual(wav);
+      const header = response.headers.get('X-Voice-Atlas-Engine');
+      if (version === '0.25.0-test') {
+        const info = JSON.parse(decodeURIComponent(header!));
+        expect(info).toMatchObject({ engine: 'VOICEVOX', version });
+        expect(Number.isFinite(Date.parse(info.checkedAt))).toBe(true);
+      } else expect(header).toBeNull();
+      expect(mockFetch.mock.calls.map(([url]) => String(url))).toEqual([
+        config.voicevoxUrl + '/speakers',
+        expect.stringContaining('/audio_query?'),
+        expect.stringContaining('/synthesis?speaker=99'),
+        config.voicevoxUrl + '/version',
+      ]);
+    },
+  );
   it.each([
     ['vv-metan-whisper', '四国めたん', 'ささやき'],
     ['vv-ryusei-whisper', '青山龍星', '囁き'],

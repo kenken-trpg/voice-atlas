@@ -3,6 +3,7 @@ import { voices } from '../shared/catalog';
 import { makeRecipe } from '../shared/recommend';
 import { makeEvaluationDataset, type EvaluationRecord } from '../shared/evaluation-dataset';
 import type { Evaluation } from '../shared/saved-recipe';
+import { captureEvaluationEvidence } from '../shared/evaluation-evidence';
 
 const metan = voices.find((voice) => voice.id === 'vv-metan')!;
 const ryusei = voices.find((voice) => voice.id === 'vv-ryusei')!;
@@ -137,7 +138,9 @@ test('imports a batch atomically and retains historical IDs without inventing sc
   unknown.evaluation.candidates[0].voiceId = 'removed-voice';
   await input.setInputFiles(file(makeEvaluationDataset([unknown])));
   await expect(panel.locator('.evaluation-summary')).toContainText('集計した評価：2件');
-  await expect(panel.getByText('A：未収録：removed-voice ／ スコア：未収録')).toBeVisible();
+  const removed = panel.locator('.evaluation-records > li').filter({ hasText: '以前の声の記録' });
+  await expect(removed.getByText('A：未収録：removed-voice', { exact: true })).toBeVisible();
+  await expect(removed.getByText('現行スコア：未収録', { exact: true })).toBeVisible();
   await input.setInputFiles(file({ format: 'voice-atlas-recipe', version: 1 }));
   await expect(panel.getByRole('status').filter({ hasText: '評価履歴はありません' })).toBeVisible();
   await input.setInputFiles(file({ ...makeEvaluationDataset([record()]), version: 99 }));
@@ -167,4 +170,107 @@ test('paginates and exports all filtered records rather than only the current pa
   await expect(panel.getByRole('button', { name: '絞り込み結果をCSVで保存' })).toBeDisabled();
   await panel.getByRole('button', { name: '集計をクリア' }).click();
   await expect(panel.locator('.evaluation-summary')).toContainText('集計した評価：0件');
+});
+
+test('compares preserved historic scores with current scores across revisions and old archives', async ({
+  page,
+}) => {
+  const historic = record('a', '以前の推薦より、この声を優先した。');
+  historic.evaluation.evidence = captureEvaluationEvidence(
+    metan.profile,
+    [metan.id, ryusei.id],
+    [
+      { engine: 'VOICEVOX', version: 'test-previous-engine', checkedAt: '2026-10-21T00:00:00Z' },
+      null,
+    ],
+  );
+  const evidence = historic.evaluation.evidence;
+  evidence.algorithmRevision = 'previous-algorithm';
+  evidence.catalogRevision = 'previous-catalog';
+  evidence.candidates[0] = { voiceId: metan.id, score: 20, rank: 20 };
+  evidence.candidates[1] = { voiceId: ryusei.id, score: 95, rank: 1 };
+  const another = structuredClone(historic);
+  another.evaluation.reason = 'さらに前の版の判断。';
+  another.evaluation.evidence!.catalogRevision = 'earlier-catalog';
+  another.evaluation.evidence!.candidates[0].voiceId = 'removed-historical-voice';
+  another.evaluation.candidates[0].voiceId = 'removed-historical-voice';
+  const legacy = record('b', '旧形式の評価。');
+  await page.goto('/');
+  await page.getByRole('button', { name: '評価記録をまとめる' }).click();
+  const panel = page.getByRole('region', { name: '評価記録の集計' });
+  await panel.getByLabel('集計用JSONファイル').setInputFiles([
+    file(makeEvaluationDataset([historic, another]), 'current-format.json'),
+    file(
+      {
+        format: 'voice-atlas-evaluations',
+        version: 1,
+        createdAt: legacy.evaluation.recordedAt,
+        records: [legacy],
+      },
+      'legacy.json',
+    ),
+  ]);
+  await expect(panel.locator('.evaluation-summary')).toContainText('集計した評価：3件');
+  await expect(panel.locator('.evaluation-summary')).toContainText('評価時の記録なし：1件');
+  const item = panel
+    .locator('.evaluation-records > li')
+    .filter({ hasText: historic.evaluation.reason });
+  await expect(item).toContainText('評価時スコア：20（20位 / 20候補）');
+  await expect(item).toContainText('現行スコア：100（1位 / 20候補） ／ 差：+80');
+  await expect(item).toContainText('評価時：低スコアの候補を採用');
+  await expect(item).toContainText('現行：高スコアの候補を採用');
+  await item.getByText('比較条件を見る', { exact: true }).click();
+  await expect(item).toContainText('previous-algorithm');
+  await expect(item).toContainText('test-previous-engine');
+  await expect(item).toContainText('候補Bのエンジン情報：記録なし');
+  await panel
+    .getByRole('combobox', { name: '評価時スコアとの関係', exact: true })
+    .selectOption('lower');
+  await expect(panel.locator('.evaluation-records > li')).toHaveCount(2);
+  await panel
+    .getByRole('combobox', { name: '現行スコアとの関係', exact: true })
+    .selectOption('higher');
+  await expect(panel.locator('.evaluation-records > li')).toHaveCount(1);
+  await panel
+    .getByRole('combobox', { name: '現行スコアとの関係', exact: true })
+    .selectOption('all');
+  await panel
+    .getByRole('combobox', { name: '評価時スコアとの関係', exact: true })
+    .selectOption('unrecorded');
+  await expect(panel.locator('.evaluation-records > li')).toHaveCount(1);
+  await expect(panel.locator('.evaluation-records')).toContainText('評価時スコア：記録なし');
+  await panel
+    .getByRole('combobox', { name: '評価時スコアとの関係', exact: true })
+    .selectOption('all');
+  await panel
+    .getByLabel('評価時の版で絞り込む')
+    .selectOption(JSON.stringify(['previous-algorithm', 'previous-catalog']));
+  await expect(panel.locator('.evaluation-records > li')).toHaveCount(1);
+  const csvEvent = page.waitForEvent('download');
+  await panel.getByRole('button', { name: '絞り込み結果をCSVで保存' }).click();
+  const csv = (await downloadedBuffer(await csvEvent)).toString();
+  expect(csv).toContain('"recorded_score_a"');
+  expect(csv).toContain('"previous-catalog"');
+  expect(csv).toContain('"test-previous-engine"');
+  expect(csv).not.toContain('removed-historical-voice');
+  const jsonEvent = page.waitForEvent('download');
+  await panel.getByRole('button', { name: '集計全体をJSONで保存' }).click();
+  const saved = await downloadedBuffer(await jsonEvent);
+  const archive = JSON.parse(saved.toString());
+  expect(archive.version).toBe(2);
+  expect(archive.records).toHaveLength(3);
+  expect(
+    archive.records.find(
+      (entry: EvaluationRecord) => entry.evaluation.reason === historic.evaluation.reason,
+    ).evaluation.evidence,
+  ).toEqual(evidence);
+  await page.reload();
+  await page.getByRole('button', { name: '評価記録をまとめる' }).click();
+  await panel
+    .getByLabel('集計用JSONファイル')
+    .setInputFiles({ name: 'saved.json', mimeType: 'application/json', buffer: saved });
+  await expect(panel.locator('.evaluation-summary')).toContainText('集計した評価：3件');
+  await expect(item).toContainText('評価時スコア：20（20位 / 20候補）');
+  await panel.screenshot({ path: test.info().outputPath('evaluation-evidence.png') });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

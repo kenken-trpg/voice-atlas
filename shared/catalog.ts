@@ -3,6 +3,8 @@ import type { CatalogSpeaker, CatalogStyle, Voice } from './schema';
 // Profiles are uncalibrated editorial starting points, not listening measurements.
 // Official sources confirm identities and styles, not these scores or casting claims.
 export const catalogReviewedAt = '2026-10-21';
+// Bump when identities, styles, profiles or tuning policies change; review dates are separate.
+export const catalogRevision = 'catalog-2026-10-21.1';
 
 export const speakers: CatalogSpeaker[] = [
   {

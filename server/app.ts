@@ -4,7 +4,14 @@ import { voices, catalogReviewedAt } from '../shared/catalog';
 import { analyzeRequestSchema, previewRequestSchema, recommendRequestSchema } from './validation';
 import { recommend } from '../shared/recommend';
 import type { Config } from './config';
-import { analyzeImage, AppError, capabilities, synthesize, type Fetcher } from './services';
+import {
+  analyzeImage,
+  AppError,
+  capabilities,
+  synthesize,
+  getEngineInfo,
+  type Fetcher,
+} from './services';
 
 export function createApp(config: Config, fetcher: Fetcher = fetch) {
   const app = express();
@@ -70,9 +77,13 @@ export function createApp(config: Config, fetcher: Fetcher = fetch) {
     const input = previewRequestSchema.parse(req.body);
     const voice = voices.find((item) => item.id === input.voiceId);
     if (!voice) throw new AppError(404, '話者が見つかりません。');
-    const wav = await runExclusive(() =>
-      synthesize(config, voice, input.text, input.recipe, fetcher),
-    );
+    const { wav, engineInfo } = await runExclusive(async () => {
+      const wav = await synthesize(config, voice, input.text, input.recipe, fetcher);
+      const engineInfo = await getEngineInfo(config, fetcher);
+      return { wav, engineInfo };
+    });
+    if (engineInfo)
+      res.setHeader('X-Voice-Atlas-Engine', encodeURIComponent(JSON.stringify(engineInfo)));
     res.type('audio/wav').send(wav);
   });
   app.use('/api', (_req, res) => res.status(404).json({ error: 'APIが見つかりません。' }));
