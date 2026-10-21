@@ -12,7 +12,7 @@ const round = (value: number) => Math.round(value * 100) / 100;
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
 export function makeRecipe(profile: Profile, voice: Voice): Recipe {
-  const whisper = voice.style === 'ささやき';
+  const whisper = voice.pitchPolicy === 'preserve';
   return {
     speedScale: round(clamp(0.86 + profile.energy * 0.003, 0.8, 1.2)),
     pitchScale: whisper

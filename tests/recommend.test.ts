@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { voices } from '../shared/catalog';
-import { recommend } from '../shared/recommend';
-import { axes, neutralProfile, recipeSchema } from '../shared/schema';
+import { voices, speakers, styles } from '../shared/catalog';
+import { makeRecipe, recommend } from '../shared/recommend';
+import { axes, neutralProfile, profileSchema, recipeSchema } from '../shared/schema';
 import { loopbackUrl } from '../server/config';
 
 describe('editorial voice recommendations', () => {
@@ -51,8 +51,62 @@ describe('editorial voice recommendations', () => {
       for (const link of [voice.productUrl, voice.termsUrl, voice.docsUrl]) {
         const url = new URL(link);
         expect(url.protocol).toBe('https:');
-        expect(['voicevox.hiroshiba.jp', 'coeiroink.com', 'aivoice.jp']).toContain(url.hostname);
+        expect([
+          'voicevox.hiroshiba.jp',
+          'coeiroink.com',
+          'aivoice.jp',
+          'zunko.jp',
+          'www.virvoxproject.com',
+          'www.meimeihimari.com',
+          'frontier.creatia.cc',
+          'www.krnr.top',
+        ]).toContain(url.hostname);
       }
+  });
+  it('keeps unique speaker identities and independently profiled styles with provenance', () => {
+    expect(new Set(speakers.map((speaker) => speaker.id)).size).toBe(speakers.length);
+    expect(
+      new Set(voices.map((voice) => JSON.stringify([voice.engine, voice.name, voice.style]))).size,
+    ).toBe(voices.length);
+    for (const style of styles) {
+      expect(speakers.some((speaker) => speaker.id === style.speakerId)).toBe(true);
+      expect(profileSchema.safeParse(style.profile).success).toBe(true);
+      expect(style.provenance.profileMethod).toBe('editorial-unverified');
+      expect(style.provenance.listeningReviewedAt).toBeNull();
+      expect(style.provenance.reviewedAt).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      const source = new URL(style.provenance.sourceUrl);
+      expect(source.protocol).toBe('https:');
+      expect(['github.com', 'coeiroink.com', 'aivoice.jp']).toContain(source.hostname);
+    }
+  });
+  it('preserves whisper pitch across display names and extreme profiles', () => {
+    const whispers = voices.filter((voice) => voice.pitchPolicy === 'preserve');
+    expect(whispers.some((voice) => voice.style === '囁き')).toBe(true);
+    expect(whispers.some((voice) => voice.style === '内緒話')).toBe(true);
+    for (const voice of whispers)
+      for (const pitch of [0, 100]) {
+        const recipe = makeRecipe(
+          { ...neutralProfile, pitch },
+          { ...voice, style: '表示名を変更' },
+        );
+        expect(recipe.pitchScale).toBe(0);
+        expect(recipeSchema.safeParse(recipe).success).toBe(true);
+      }
+    expect(
+      makeRecipe(
+        { ...neutralProfile, pitch: 100 },
+        voices.find((voice) => voice.id === 'vv-ryusei')!,
+      ).pitchScale,
+    ).toBeGreaterThan(0);
+  });
+  it('ranks styles of the same speaker independently', () => {
+    const whisper = voices.find((voice) => voice.id === 'vv-metan-whisper')!;
+    const results = recommend(whisper.profile, { engine: 'VOICEVOX', budget: 'all' });
+    expect(results.findIndex((item) => item.voice.id === whisper.id)).toBeLessThan(
+      results.findIndex((item) => item.voice.id === 'vv-metan'),
+    );
+    expect(whisper.speakerId).toBe(voices.find((voice) => voice.id === 'vv-metan')!.speakerId);
+    expect(whisper.profile).not.toEqual(voices.find((voice) => voice.id === 'vv-metan')!.profile);
   });
 });
 describe('local service URLs', () => {

@@ -114,21 +114,35 @@ export const recipeFields: {
     help: '余韻を残したい場合は少し長くします。',
   },
 ];
-export interface Voice {
+export interface CatalogSpeaker {
   id: string;
   engine: Engine;
   name: string;
-  style: string;
   price: 'free' | 'paid';
-  tags: string[];
-  description: string;
-  profile: Profile;
   color: string;
   productUrl: string;
   termsUrl: string;
   docsUrl: string;
   credit: string;
+  reviewedAt: string;
+  termsNote?: string;
 }
+export interface CatalogStyle {
+  id: string;
+  speakerId: string;
+  style: string;
+  tags: string[];
+  description: string;
+  profile: Profile;
+  pitchPolicy: 'adjust' | 'preserve';
+  provenance: {
+    sourceUrl: string;
+    reviewedAt: string;
+    profileMethod: 'editorial-unverified';
+    listeningReviewedAt: null;
+  };
+}
+export interface Voice extends Omit<CatalogSpeaker, 'id'>, CatalogStyle {}
 export interface Recommendation {
   voice: Voice;
   score: number;
@@ -141,7 +155,12 @@ export interface Capabilities {
   openai: { ready: boolean; model: string };
   anthropic: { ready: boolean; model: string };
   gemini: { ready: boolean; model: string };
-  voicevox: { ready: boolean; detail: string };
+  voicevox: {
+    ready: boolean;
+    detail: string;
+    availableVoiceIds: string[];
+    checkedAt: string;
+  };
 }
 export const defaultText =
   'こんにちは。あなたと出会えて、とてもうれしいです。さあ、物語の続きを始めましょう。';

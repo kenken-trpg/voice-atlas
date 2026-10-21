@@ -876,6 +876,7 @@ textarea::placeholder {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
 }
 select {
   border: 1px solid #dce3d4;
@@ -1891,4 +1892,267 @@ footer small {
   font-size: 12px;
   font-weight: 400;
   line-height: 1.8;
+}
+
+.recipe-import,
+.recipe-notice {
+  max-width: 1240px;
+  margin: 16px auto;
+  padding: 0 28px;
+}
+.recipe-import {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.recipe-notice {
+  color: var(--green);
+  overflow-wrap: anywhere;
+}
+.compare-start {
+  margin-bottom: 20px;
+}
+.comparison-panel {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #fff;
+  padding: 24px;
+  margin-bottom: 24px;
+  min-width: 0;
+}
+.comparison-panel > p {
+  color: var(--muted);
+}
+.comparison-panel textarea,
+.comparison-panel select {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  background: #fafbf8;
+  color: var(--ink);
+  margin: 8px 0 16px;
+}
+.comparison-panel textarea {
+  resize: vertical;
+}
+.comparison-candidates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  margin: 20px 0;
+}
+.comparison-candidate {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 18px;
+}
+.comparison-candidate > label {
+  font-weight: 700;
+}
+.comparison-panel audio {
+  width: 100%;
+  min-width: 0;
+  margin: 12px 0;
+}
+.comparison-panel a {
+  text-decoration: underline;
+  font-size: 12px;
+}
+.comparison-evaluation {
+  min-width: 0;
+  margin: 24px 0 12px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.comparison-outcomes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  margin: 12px 0;
+}
+.comparison-outcomes label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.evaluation-history {
+  padding-left: 22px;
+  overflow-wrap: anywhere;
+}
+.evaluation-history li {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+@media (max-width: 700px) {
+  .comparison-candidates {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .comparison-panel {
+    padding: 16px;
+  }
+  .comparison-candidate {
+    padding: 12px;
+  }
+}
+
+.catalog-provenance {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+.catalog-provenance a {
+  text-decoration: underline;
+}
+
+.evaluation-workbench {
+  max-width: 1184px;
+  margin: 24px auto;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #fff;
+  overflow-wrap: anywhere;
+}
+.evaluation-workbench h2 {
+  font-size: 22px;
+}
+.evaluation-actions,
+.evaluation-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0;
+}
+.evaluation-summary {
+  padding: 16px;
+  margin: 20px 0;
+  border-radius: 12px;
+  background: var(--soft);
+}
+.evaluation-summary p {
+  margin: 8px 0 0;
+}
+.evaluation-error {
+  color: #943f38;
+}
+.evaluation-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.5fr);
+  gap: 16px;
+  margin: 20px 0;
+}
+.evaluation-filters label {
+  min-width: 0;
+}
+.evaluation-filters select,
+.evaluation-filters input {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  padding: 10px;
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fafbf8;
+  color: var(--ink);
+}
+.evaluation-records {
+  padding-left: 24px;
+}
+.evaluation-records li {
+  padding: 18px 0;
+  border-bottom: 1px solid var(--line);
+}
+.evaluation-records h3 {
+  font-size: 16px;
+}
+.evaluation-records h3 small {
+  font-size: 12px;
+  font-weight: 400;
+}
+.evaluation-records p {
+  margin: 8px 0;
+}
+.evaluation-records details {
+  margin-top: 12px;
+}
+.evaluation-text {
+  white-space: pre-wrap;
+}
+.evaluation-table {
+  overflow-x: auto;
+}
+.evaluation-table table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+}
+.evaluation-table th,
+.evaluation-table td {
+  text-align: left;
+  padding: 8px;
+  border-bottom: 1px solid var(--line);
+}
+@media (max-width: 700px) {
+  .evaluation-workbench {
+    margin: 16px;
+    padding: 16px;
+  }
+  .evaluation-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .evaluation-workbench h2 {
+    font-size: 19px;
+  }
+}
+
+.availability-badge {
+  display: inline-block;
+  width: fit-content;
+  max-width: 100%;
+  border-radius: 4px;
+  padding: 3px 7px;
+  margin: 6px 0;
+  background: #eef0eb;
+  color: #596354;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.availability-available {
+  background: #e3efdf;
+  color: #355b2b;
+}
+.availability-missing {
+  background: #fff0d9;
+  color: #79551e;
+}
+.availability-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin: 10px 0;
+  font-size: 11px;
+  color: #596354;
+}
+.availability-summary .text-button {
+  flex-shrink: 0;
+}
+.availability-help {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 700px) {
+  .filters > div {
+    width: 100%;
+  }
 }

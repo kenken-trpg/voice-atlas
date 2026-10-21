@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import sharp from 'sharp';
+import { voices } from '../shared/catalog';
 const unavailable = {
   ollama: { ready: false, model: 'test', detail: '未接続' },
   openai: { ready: false, model: 'test' },
@@ -16,14 +17,14 @@ test('manual discovery, filters, detail guides and empty-state recovery', async 
   await page.goto('/');
   await page.getByRole('button', { name: '明るく、親しみやすく' }).click();
   await expect(page.getByRole('heading', { name: 'あなたの演出に、近い声。' })).toBeVisible();
-  await expect(page.locator('.voice-card')).toHaveCount(10);
+  await expect(page.locator('.voice-card')).toHaveCount(24);
   await page.getByLabel('ソフトで絞り込む').selectOption('A.I.VOICE2');
   await expect(page.locator('.voice-card')).toHaveCount(2);
   await expect(page.getByRole('heading', { name: '調声ガイド', exact: true })).toBeVisible();
   await page.getByLabel('無料のみ').check();
   await expect(page.getByRole('heading', { name: 'この条件の候補はありません' })).toBeVisible();
   await page.getByRole('button', { name: '絞り込みをリセット' }).click();
-  await expect(page.locator('.voice-card')).toHaveCount(10);
+  await expect(page.locator('.voice-card')).toHaveCount(24);
   expect(errors).toEqual([]);
 });
 test('exports the chosen voice and edited recipe without embedding the image', async ({ page }) => {
@@ -181,7 +182,19 @@ test('stays within the viewport on home and recommendation screens', async ({ pa
 
 test('previews edited settings and invalidates audio after further editing', async ({ page }) => {
   await page.route('**/api/capabilities', (route) =>
-    route.fulfill({ json: { ...unavailable, voicevox: { ready: true, detail: '接続済み' } } }),
+    route.fulfill({
+      json: {
+        ...unavailable,
+        voicevox: {
+          ready: true,
+          detail: '接続済み',
+          availableVoiceIds: voices
+            .filter((voice) => voice.engine === 'VOICEVOX')
+            .map((voice) => voice.id),
+          checkedAt: '2026-10-21T00:00:00Z',
+        },
+      },
+    }),
   );
   let received = false;
   await page.route('**/api/preview', async (route) => {

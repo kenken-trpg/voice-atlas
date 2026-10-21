@@ -5,25 +5,27 @@ export function RecipeControls({
   recipe,
   disabled,
   onChange,
+  idPrefix = 'recipe',
 }: {
   recipe: Recipe;
   disabled: boolean;
   onChange: (key: keyof Recipe, value: number) => void;
+  idPrefix?: string;
 }) {
   return (
     <div className="recipe-sliders">
       {recipeFields.map((field) => (
         <div className="recipe-control" key={field.key}>
           <div className="control-heading">
-            <label htmlFor={`recipe-${field.key}`}>{field.label}</label>
+            <label htmlFor={`${idPrefix}-${field.key}`}>{field.label}</label>
             <HelpTip label={field.label}>{field.help}</HelpTip>
-            <output htmlFor={`recipe-${field.key}`}>
+            <output htmlFor={`${idPrefix}-${field.key}`}>
               {recipe[field.key].toFixed(2)}
               <small>{field.unit}</small>
             </output>
           </div>
           <input
-            id={`recipe-${field.key}`}
+            id={`${idPrefix}-${field.key}`}
             type="range"
             min={field.min}
             max={field.max}

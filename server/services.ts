@@ -11,6 +11,8 @@ import {
 } from '../shared/schema';
 import type { Config } from './config';
 import { analysisSchemas } from './analysis-schemas';
+import { voices } from '../shared/catalog';
+import { findVoicevoxStyle } from '../shared/voicevox';
 import { AppError, remoteJson, remoteBytes, maxWavBytes, type Fetcher } from './remote';
 export { AppError, type Fetcher } from './remote';
 
@@ -76,6 +78,13 @@ export async function capabilities(
     gemini: { ready: Boolean(config.geminiKey), model: config.geminiModel },
     voicevox: {
       ready: voicevox.status === 'fulfilled',
+      availableVoiceIds:
+        voicevox.status === 'fulfilled'
+          ? voices
+              .filter((voice) => findVoicevoxStyle(voicevox.value, voice))
+              .map((voice) => voice.id)
+          : [],
+      checkedAt: new Date().toISOString(),
       detail:
         voicevox.status === 'fulfilled'
           ? 'ローカルエンジンに接続済み'
@@ -378,11 +387,8 @@ export async function synthesize(
       'この話者はアプリ内試聴に対応していません。公式サンプルをご利用ください。',
     );
   const speakers = await getSpeakers(config, fetcher);
-  const speaker = speakers.find((item) => item.name === voice.name);
-  const style = speaker?.styles.find(
-    (item) => item.name === voice.style && (!item.type || item.type === 'talk'),
-  );
-  if (!speaker || !style)
+  const style = findVoicevoxStyle(speakers, voice);
+  if (!style)
     throw new AppError(
       409,
       `接続中のVOICEVOXに「${voice.name} / ${voice.style}」がありません。音声ライブラリを確認してください。`,

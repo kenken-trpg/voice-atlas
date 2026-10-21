@@ -32,13 +32,17 @@ import {
   type Preferences,
   type Profile,
   type Recipe,
-  type Recommendation,
 } from '../shared/schema';
 import { catalogReviewedAt, voices } from '../shared/catalog';
 import { recommend } from '../shared/recommend';
+import { voiceAvailability, type VoiceAvailability } from '../shared/voicevox';
+import { parseSavedRecipe, type Evaluation } from '../shared/saved-recipe';
+import { ComparisonPanel, pauseOtherAudio } from './components/ComparisonPanel';
+import { EvaluationWorkbench } from './components/EvaluationWorkbench';
 import { HelpTip } from './components/HelpTip';
 import { VoiceMark } from './components/VoiceMark';
 import { RecipeControls } from './components/RecipeControls';
+import { AvailabilityBadge, AvailabilityHelp } from './components/AvailabilityBadge';
 import { jsonRequest, download } from './lib/http';
 import './styles.css';
 
@@ -81,23 +85,32 @@ function App() {
   const [direction, setDirection] = useState('');
   const [profile, setProfile] = useState<Profile>({ ...neutralProfile });
   const [preferences, setPreferences] = useState<Preferences>({ engine: 'all', budget: 'all' });
+  const [availableOnly, setAvailableOnly] = useState(false);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [source, setSource] = useState<Mode>('manual');
   const [edited, setEdited] = useState(false);
   const [hasResults, setHasResults] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [recipe, setRecipe] = useState<Recipe | null>(null);
+  const [recipes, setRecipes] = useState<Record<string, Recipe>>({});
+  const [comparisonIds, setComparisonIds] = useState<[string, string] | null>(null);
+  const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
+  const [evaluationOpen, setEvaluationOpen] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [loadingRecipe, setLoadingRecipe] = useState(false);
   const [text, setText] = useState(defaultText);
   const [caps, setCaps] = useState<Capabilities | null>(null);
   const [checking, setChecking] = useState(false);
+  const connectionGeneration = useRef(0);
   const [busy, setBusy] = useState<'analysis' | 'audio' | null>(null);
   const [loadingImage, setLoadingImage] = useState(false);
   const [error, setError] = useState('');
-  const [audioUrl, setAudioUrl] = useState('');
-  const [audioLabel, setAudioLabel] = useState('');
+  const [audioCache, setAudioCache] = useState<Record<string, { key: string; url: string }>>({});
+  const audioCacheRef = useRef(audioCache);
+  const generatingRef = useRef(false);
   const [dragging, setDragging] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const recipeFileRef = useRef<HTMLInputElement>(null);
   const imageGeneration = useRef(0);
   const requestRef = useRef<AbortController | null>(null);
   const resultsRef = useRef<HTMLElement>(null);
@@ -106,13 +119,18 @@ function App() {
   const providerName = mode === 'manual' ? '手動' : providerLabels[mode];
 
   async function refresh() {
+    const generation = ++connectionGeneration.current;
     setChecking(true);
     try {
-      setCaps(await jsonRequest<Capabilities>('/api/capabilities'));
+      const result = await jsonRequest<Capabilities>('/api/capabilities');
+      if (generation === connectionGeneration.current) setCaps(result);
     } catch {
-      setError('接続状態を確認できませんでした。アプリのサーバーを確認してください。');
+      if (generation === connectionGeneration.current) {
+        setCaps(null);
+        setError('接続状態を確認できませんでした。アプリのサーバーを確認してください。');
+      }
     } finally {
-      setChecking(false);
+      if (generation === connectionGeneration.current) setChecking(false);
     }
   }
   useEffect(() => {
@@ -121,21 +139,53 @@ function App() {
   }, []);
   useEffect(
     () => () => {
-      if (audioUrl) URL.revokeObjectURL(audioUrl);
+      Object.values(audioCacheRef.current).forEach((audio) => URL.revokeObjectURL(audio.url));
     },
-    [audioUrl],
+    [],
   );
-  const recommendations = useMemo(() => recommend(profile, preferences), [profile, preferences]);
+  const availability = useMemo(
+    () =>
+      Object.fromEntries(
+        voices.map((voice) => [voice.id, voiceAvailability(voice, caps?.voicevox, checking)]),
+      ) as Record<string, VoiceAvailability>,
+    [caps, checking],
+  );
+  const recommendations = useMemo(
+    () =>
+      recommend(profile, preferences).filter(
+        (item) => !availableOnly || availability[item.voice.id] === 'available',
+      ),
+    [profile, preferences, availableOnly, availability],
+  );
+  const allRecommendations = useMemo(
+    () => recommend(profile, { engine: 'all', budget: 'all' }),
+    [profile],
+  );
+  const voicevoxVoices = voices.filter((voice) => voice.engine === 'VOICEVOX');
   const selected =
     recommendations.find((item) => item.voice.id === selectedId) || recommendations[0];
-  const selectionKey = selected ? JSON.stringify([selected.voice.id, selected.recipe]) : '';
-  useEffect(() => {
-    setRecipe(selected?.recipe ? { ...selected.recipe } : null);
-    setAudioUrl('');
-  }, [selectionKey]);
-  useEffect(() => {
-    setAudioUrl('');
-  }, [text, recipe]);
+  function getRecipe(id: string): Recipe {
+    return recipes[id] ?? allRecommendations.find((item) => item.voice.id === id)!.recipe!;
+  }
+  const recipe = selected?.recipe ? getRecipe(selected.voice.id) : null;
+  function audioKey(parameters: Recipe) {
+    return JSON.stringify([text, parameters]);
+  }
+  function getAudio(id: string) {
+    const audio = audioCache[id];
+    return audio?.key === audioKey(getRecipe(id)) ? audio.url : '';
+  }
+  const audioUrl = selected?.recipe ? getAudio(selected.voice.id) : '';
+  const audioLabel = selected ? `${selected.voice.name} / ${selected.voice.style}` : '';
+  function clearAudio() {
+    Object.values(audioCacheRef.current).forEach((audio) => URL.revokeObjectURL(audio.url));
+    audioCacheRef.current = {};
+    setAudioCache({});
+  }
+  function changeRecipe(id: string, parameters: Recipe) {
+    setRecipes((current) => ({ ...current, [id]: parameters }));
+    setEdited(true);
+  }
 
   async function loadImage(file?: File) {
     if (!file || busy) return;
@@ -156,7 +206,11 @@ function App() {
       setImage({ url, name: file.name });
       setAnalysis(null);
       setHasResults(false);
-      setAudioUrl('');
+      clearAudio();
+      setRecipes({});
+      setComparisonIds(null);
+      setEvaluations([]);
+      setNotice('');
       setSource('manual');
       setEdited(false);
     } catch (e) {
@@ -200,7 +254,6 @@ function App() {
     requestRef.current = controller;
     setBusy('analysis');
     setError('');
-    setAudioUrl('');
     try {
       const result = await jsonRequest<{ analysis: Analysis }>(
         '/api/analyze',
@@ -222,35 +275,62 @@ function App() {
       if (!controller.signal.aborted)
         setError(e instanceof Error ? e.message : '解析に失敗しました。');
     } finally {
-      setBusy(null);
+      if (requestRef.current === controller) {
+        requestRef.current = null;
+        setBusy(null);
+      }
     }
   }
-  async function preview() {
-    if (!selected || !recipe) return;
+  async function preview(ids = selected && recipe ? [selected.voice.id] : []) {
+    if (!ids.length || generatingRef.current || busy || loadingRecipe) return;
+    if (ids.some((id) => availability[id] !== 'available')) {
+      setError(
+        '試聴できない候補が含まれています。接続を再確認するか、試聴可能な話者・スタイルを選んでください。',
+      );
+      return;
+    }
+    generatingRef.current = true;
     const controller = new AbortController();
     requestRef.current = controller;
     setBusy('audio');
     setError('');
-    setAudioUrl('');
+    const jobs = ids.map((id) => ({ id, parameters: { ...getRecipe(id) } }));
+    const sampleText = text;
     try {
-      const response = await fetch('/api/preview', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ voiceId: selected.voice.id, recipe, text }),
-        signal: controller.signal,
-      });
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || '音声を生成できませんでした。');
+      for (const { id, parameters } of jobs) {
+        const key = JSON.stringify([sampleText, parameters]);
+        if (audioCacheRef.current[id]?.key === key) continue;
+        const response = await fetch('/api/preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ voiceId: id, recipe: parameters, text: sampleText }),
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          const data = await response.json();
+          throw new Error(
+            `${voices.find((voice) => voice.id === id)!.name}：${data.error || '音声を生成できませんでした。'}`,
+          );
+        }
+        const blob = await response.blob();
+        if (controller.signal.aborted) break;
+        const previous = audioCacheRef.current[id];
+        if (previous) URL.revokeObjectURL(previous.url);
+        audioCacheRef.current = {
+          ...audioCacheRef.current,
+          [id]: { key, url: URL.createObjectURL(blob) },
+        };
+        setAudioCache(audioCacheRef.current);
       }
-      const blob = await response.blob();
-      setAudioUrl(URL.createObjectURL(blob));
-      setAudioLabel(`${selected.voice.name} / ${selected.voice.style}`);
     } catch (e) {
       if (!controller.signal.aborted)
         setError(e instanceof Error ? e.message : '音声を生成できませんでした。');
     } finally {
-      setBusy(null);
+      generatingRef.current = false;
+      if (requestRef.current === controller) {
+        requestRef.current = null;
+        setBusy(null);
+      }
     }
   }
   function exportRecipe() {
@@ -260,7 +340,7 @@ function App() {
       JSON.stringify(
         {
           format: 'voice-atlas-recipe',
-          version: 1,
+          version: 2,
           createdAt: new Date().toISOString(),
           source,
           manuallyAdjusted: edited,
@@ -272,13 +352,112 @@ function App() {
           sampleText: text,
           catalogReviewedAt,
           credit: selected.voice.credit,
+          preferences,
+          candidates: voicevoxVoices.map((voice) => ({
+            voiceId: voice.id,
+            parameters: getRecipe(voice.id),
+          })),
+          comparisonIds,
+          evaluations,
         },
         null,
         2,
       ),
     );
   }
-  const disabled = Boolean(busy) || loadingImage;
+  function startComparison() {
+    const rankedIds = allRecommendations
+      .filter((item) => item.voice.engine === 'VOICEVOX')
+      .map((item) => item.voice.id);
+    const availableIds = rankedIds.filter((id) => availability[id] === 'available');
+    const ids = [...availableIds, ...rankedIds.filter((id) => availability[id] !== 'available')];
+    const first =
+      selected?.voice.engine === 'VOICEVOX' &&
+      (availability[selected.voice.id] === 'available' || availableIds.length === 0)
+        ? selected.voice.id
+        : ids[0];
+    setComparisonIds([first, ids.find((id) => id !== first)!]);
+    setNotice('');
+  }
+  function recordEvaluation(outcome: Evaluation['outcome'], reason: string) {
+    if (!comparisonIds || evaluations.length >= 100 || !comparisonIds.every((id) => getAudio(id)))
+      return;
+    const evaluation: Evaluation = {
+      recordedAt: new Date().toISOString(),
+      profile: { ...profile },
+      sampleText: text,
+      candidates: comparisonIds.map((id) => ({
+        voiceId: id,
+        parameters: { ...getRecipe(id) },
+      })) as Evaluation['candidates'],
+      outcome,
+      reason,
+    };
+    setEvaluations((current) => [...current, evaluation]);
+    if (outcome === 'a' || outcome === 'b') {
+      setAvailableOnly(false);
+      setSelectedId(comparisonIds[outcome === 'a' ? 0 : 1]);
+      setPreferences({ engine: 'VOICEVOX', budget: preferences.budget });
+    }
+    setNotice('評価を記録しました。JSONで保存すると、比較条件と理由も残せます。');
+  }
+  async function importRecipe(file?: File) {
+    if (!file || disabled) return;
+    setLoadingRecipe(true);
+    setError('');
+    setNotice('');
+    try {
+      if (file.size > 1024 * 1024) throw new Error('レシピJSONは1MB以下にしてください。');
+      let input: unknown;
+      try {
+        input = JSON.parse(await file.text());
+      } catch {
+        throw new Error('有効なJSONファイルを指定してください。');
+      }
+      const saved = parseSavedRecipe(input);
+      const restored: Record<string, Recipe> = {};
+      if (saved.version === 2)
+        saved.candidates.forEach((item) => {
+          restored[item.voiceId] = item.parameters;
+        });
+      if (saved.parameters) restored[saved.voice.id] = saved.parameters;
+      clearAudio();
+      setRecipes(restored);
+      setProfile(saved.profile);
+      const restoredPreferences =
+        saved.version === 2
+          ? saved.preferences
+          : { engine: 'all' as const, budget: 'all' as const };
+      const selectedVisible = recommend(saved.profile, restoredPreferences).some(
+        (item) => item.voice.id === saved.voice.id,
+      );
+      setPreferences(selectedVisible ? restoredPreferences : { engine: 'all', budget: 'all' });
+      setAvailableOnly(false);
+      setSelectedId(saved.voice.id);
+      setText(saved.sampleText);
+      setSource(saved.source);
+      setEdited(saved.manuallyAdjusted);
+      setComparisonIds(saved.version === 2 ? saved.comparisonIds : null);
+      setEvaluations(saved.version === 2 ? saved.evaluations : []);
+      ++imageGeneration.current;
+      setImage(null);
+      setAnalysis(null);
+      setDirection('');
+      setConsent(false);
+      setMode('manual');
+      setHasResults(true);
+      setNotice(
+        `レシピを復元しました。音声は再生成してください。${saved.catalogReviewedAt !== catalogReviewedAt ? '保存時からカタログの確認日が変わっています。公式情報も確認してください。' : ''}`,
+      );
+      revealResults();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'レシピを読み込めませんでした。');
+    } finally {
+      setLoadingRecipe(false);
+      if (recipeFileRef.current) recipeFileRef.current.value = '';
+    }
+  }
+  const disabled = Boolean(busy) || loadingImage || loadingRecipe;
   const providerReady = mode === 'manual' || Boolean(caps?.[mode].ready);
   return (
     <>
@@ -336,6 +515,40 @@ function App() {
             </div>
           </div>
         </section>
+        <div className="recipe-import">
+          <button
+            className="secondary-button"
+            disabled={disabled}
+            onClick={() => recipeFileRef.current?.click()}
+          >
+            レシピJSONを読み込む
+          </button>
+          <input
+            ref={recipeFileRef}
+            type="file"
+            accept=".json,application/json"
+            hidden
+            aria-label="レシピJSONファイル"
+            onChange={(e) => void importRecipe(e.target.files?.[0])}
+          />
+          <small>保存した声・調整・比較記録を復元します。</small>
+          <button
+            className="secondary-button"
+            aria-expanded={evaluationOpen}
+            aria-controls="evaluation-workbench"
+            onClick={() => setEvaluationOpen(!evaluationOpen)}
+          >
+            {evaluationOpen ? '評価記録の集計を閉じる' : '評価記録をまとめる'}
+          </button>
+        </div>
+        <div hidden={!evaluationOpen}>
+          <EvaluationWorkbench currentEvaluations={evaluations} />
+        </div>
+        {notice && (
+          <p className="recipe-notice" role="status">
+            {notice}
+          </p>
+        )}
         {settingsOpen && (
           <section className="connection-panel" aria-label="接続設定">
             <div className="section-heading">
@@ -491,7 +704,7 @@ function App() {
                           setImage(null);
                           setAnalysis(null);
                           setHasResults(false);
-                          setAudioUrl('');
+                          clearAudio();
                         }}
                       >
                         <X size={16} />
@@ -796,19 +1009,91 @@ function App() {
                       />
                       無料のみ
                     </label>
+                    <label className="free-filter">
+                      <input
+                        type="checkbox"
+                        checked={availableOnly}
+                        disabled={disabled}
+                        onChange={(event) => setAvailableOnly(event.target.checked)}
+                      />
+                      試聴可能のみ
+                    </label>
                   </div>
+                </div>
+                <div className="availability-summary" role="status" aria-live="polite">
+                  <span>
+                    VOICEVOX：
+                    {checking
+                      ? '話者・スタイルを確認中'
+                      : caps?.voicevox.ready
+                        ? `試聴可能 ${voicevoxVoices.filter((voice) => availability[voice.id] === 'available').length} / ${voicevoxVoices.length}候補`
+                        : '未接続'}
+                    {!checking && caps?.voicevox.checkedAt && (
+                      <>（確認：{new Date(caps.voicevox.checkedAt).toLocaleTimeString('ja-JP')}）</>
+                    )}
+                  </span>
+                  <button
+                    className="text-button"
+                    disabled={checking || disabled}
+                    onClick={() => void refresh()}
+                  >
+                    <RefreshCw size={14} className={checking ? 'spin' : ''} />
+                    接続を再確認
+                  </button>
                 </div>
                 <p className="score-note">
                   近さの指標は声の演出に関する独自の目安です。本人の声の一致率を表すものではありません。
                 </p>
+                {!comparisonIds && (
+                  <button
+                    className="secondary-button compare-start"
+                    disabled={disabled}
+                    onClick={startComparison}
+                  >
+                    2候補を比較する
+                  </button>
+                )}
+                {comparisonIds && (
+                  <ComparisonPanel
+                    contextKey={JSON.stringify([
+                      comparisonIds,
+                      text,
+                      profile,
+                      comparisonIds.map(getRecipe),
+                    ])}
+                    voices={voicevoxVoices}
+                    ids={comparisonIds}
+                    text={text}
+                    disabled={disabled}
+                    availability={availability}
+                    availableOnly={availableOnly}
+                    generating={busy === 'audio'}
+                    evaluations={evaluations}
+                    getRecipe={getRecipe}
+                    getAudio={getAudio}
+                    onPairChange={setComparisonIds}
+                    onTextChange={setText}
+                    onRecipeChange={changeRecipe}
+                    onGenerate={() => void preview(comparisonIds)}
+                    onRecord={recordEvaluation}
+                    selectedId={selected?.voice.id ?? ''}
+                  />
+                )}
                 {recommendations.length === 0 ? (
                   <div className="no-results">
                     <Mic2 size={28} />
                     <h3>この条件の候補はありません</h3>
-                    <p>ソフトまたは「無料のみ」の条件を変更してください。</p>
+                    <p>
+                      {availableOnly
+                        ? 'VOICEVOXの接続・音声ライブラリを確認するか、「試聴可能のみ」やソフトの条件を変更してください。'
+                        : 'ソフトまたは「無料のみ」の条件を変更してください。'}
+                    </p>
                     <button
                       className="secondary-button"
-                      onClick={() => setPreferences({ engine: 'all', budget: 'all' })}
+                      onClick={() => {
+                        setPreferences({ engine: 'all', budget: 'all' });
+                        setAvailableOnly(false);
+                      }}
                     >
                       絞り込みをリセット
                     </button>
@@ -847,6 +1132,7 @@ function App() {
                               <small>{item.voice.style}</small>
                             </div>
                           </div>
+                          <AvailabilityBadge status={availability[item.voice.id]} />
                           <div className="voice-card-bottom">
                             <span>{item.voice.tags.slice(0, 2).join(' · ')}</span>
                             <span className="score">
@@ -873,6 +1159,19 @@ function App() {
                             </div>
                           </div>
                           <p className="voice-description">{selected.voice.description}</p>
+                          <AvailabilityBadge status={availability[selected.voice.id]} />
+                          <p className="catalog-provenance">
+                            声の特徴は未校正の編集値です。実機での聴取評価は未実施です。
+                            <br />
+                            <a
+                              href={selected.voice.provenance.sourceUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              話者・スタイルの出典
+                            </a>{' '}
+                            ／ 確認日：{selected.voice.provenance.reviewedAt}
+                          </p>
                           <div className="tags">
                             {selected.voice.tags.map((tag) => (
                               <span key={tag}>{tag}</span>
@@ -903,8 +1202,11 @@ function App() {
                                 className="text-button"
                                 disabled={disabled}
                                 onClick={() => {
-                                  setRecipe({ ...selected.recipe! });
-                                  setAudioUrl('');
+                                  setRecipes((current) => {
+                                    const next = { ...current };
+                                    delete next[selected.voice.id];
+                                    return next;
+                                  });
                                 }}
                               >
                                 提案値に戻す
@@ -921,10 +1223,7 @@ function App() {
                               recipe={recipe}
                               disabled={disabled}
                               onChange={(key, value) => {
-                                setRecipe((current) =>
-                                  current ? { ...current, [key]: value } : null,
-                                );
-                                setEdited(true);
+                                changeRecipe(selected.voice.id, { ...recipe!, [key]: value });
                               }}
                             />
                           )}
@@ -956,7 +1255,11 @@ function App() {
                               <button
                                 className="secondary-button audition-button"
                                 onClick={() => void preview()}
-                                disabled={disabled || !caps?.voicevox.ready || !text.trim()}
+                                disabled={
+                                  disabled ||
+                                  availability[selected.voice.id] !== 'available' ||
+                                  !text.trim()
+                                }
                               >
                                 {busy === 'audio' ? (
                                   <LoaderCircle className="spin" size={16} />
@@ -965,11 +1268,7 @@ function App() {
                                 )}
                                 VOICEVOXで音声を生成
                               </button>
-                              {!caps?.voicevox.ready && (
-                                <small className="footnote">
-                                  このPCでVOICEVOXを起動し、接続設定で再確認してください。
-                                </small>
-                              )}
+                              <AvailabilityHelp status={availability[selected.voice.id]} />
                               {audioUrl && (
                                 <div className="audio-result">
                                   <small>{audioLabel} · 現在の設定</small>
@@ -977,6 +1276,7 @@ function App() {
                                     controls
                                     src={audioUrl}
                                     aria-label={`${audioLabel}の試聴`}
+                                    onPlay={pauseOtherAudio}
                                   />
                                   <a
                                     href={audioUrl}
@@ -1021,6 +1321,7 @@ function App() {
                             <p>
                               公開・商用利用前に、ソフトと話者それぞれの最新の規約をご確認ください。無料で使えることと、用途の許諾は別です。
                             </p>
+                            {selected.voice.termsNote && <p>{selected.voice.termsNote}</p>}
                           </div>
                         </div>
                       </section>

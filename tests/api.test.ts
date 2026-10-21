@@ -81,6 +81,70 @@ describe('local API boundaries', () => {
     const body = await (await fetch(base + '/api/capabilities')).json();
     expect(body.ollama.ready).toBe(false);
     expect(body.voicevox.ready).toBe(false);
+    expect(body.voicevox.availableVoiceIds).toEqual([]);
+  });
+  it('preflights exact talk styles from one inventory request without synthesizing', async () => {
+    mockFetch.mockImplementation(async (url) =>
+      String(url).endsWith('/api/show')
+        ? json({ capabilities: ['vision'] })
+        : json([
+            {
+              name: '四国めたん',
+              speaker_uuid: 'metan',
+              styles: [
+                { name: 'ノーマル', id: 9000, type: 'talk' },
+                { name: 'ささやき', id: 9001, type: 'sing' },
+                { name: 'あまあま', id: 9002 },
+              ],
+            },
+            {
+              name: '青山龍星',
+              speaker_uuid: 'ryusei',
+              styles: [{ name: '囁き', id: 9010, type: 'talk' }],
+            },
+            {
+              name: '未収録の話者',
+              speaker_uuid: 'unknown',
+              styles: [{ name: 'ノーマル', id: 9020 }],
+            },
+          ]),
+    );
+    const body = await (await fetch(base + '/api/capabilities')).json();
+    expect(body.voicevox).toMatchObject({
+      ready: true,
+      availableVoiceIds: ['vv-metan', 'vv-metan-sweet', 'vv-ryusei-whisper'],
+    });
+    expect(Number.isFinite(Date.parse(body.voicevox.checkedAt))).toBe(true);
+    expect(JSON.stringify(body)).not.toContain('未収録の話者');
+    expect(
+      mockFetch.mock.calls.map(([url]) => String(url)).filter((url) => url.endsWith('/speakers')),
+    ).toHaveLength(1);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    // A singing style with a matching display name must fail before audio_query too.
+    const voice = voices.find((item) => item.id === 'vv-metan-whisper')!;
+    const response = await post('/api/preview', {
+      voiceId: voice.id,
+      text: 'テスト',
+      recipe: makeRecipe(neutralProfile, voice),
+    });
+    expect(response.status).toBe(409);
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+  });
+  it('distinguishes an empty connected engine from a failed inventory and refreshes installed styles', async () => {
+    mockFetch.mockImplementation(async () => json([]));
+    let body = await (await fetch(base + '/api/capabilities')).json();
+    expect(body.voicevox).toMatchObject({ ready: true, availableVoiceIds: [] });
+    mockFetch.mockImplementation(async () =>
+      json([{ name: '青山龍星', speaker_uuid: 'ryusei', styles: [{ name: 'ノーマル', id: 1 }] }]),
+    );
+    body = await (await fetch(base + '/api/capabilities')).json();
+    expect(body.voicevox).toMatchObject({ ready: true, availableVoiceIds: ['vv-ryusei'] });
+    mockFetch.mockImplementation(async () => json([{ name: '青山龍星', styles: 'broken' }]));
+    body = await (await fetch(base + '/api/capabilities')).json();
+    expect(body.voicevox).toMatchObject({ ready: false, availableVoiceIds: [] });
+    mockFetch.mockRejectedValue(new Error('offline'));
+    body = await (await fetch(base + '/api/capabilities')).json();
+    expect(body.voicevox).toMatchObject({ ready: false, availableVoiceIds: [] });
   });
   it('protects document routes as well as API routes', async () => {
     for (const path of ['/', '/assets/test.js', '/api/health']) {
@@ -190,7 +254,7 @@ describe('local API boundaries', () => {
     });
     expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body.recommendations).toHaveLength(6);
+    expect(body.recommendations).toHaveLength(20);
     expect(mockFetch).not.toHaveBeenCalled();
   });
 });
@@ -262,6 +326,42 @@ describe('vision provider contracts (mocked, no paid requests)', () => {
   });
 });
 describe('speaker resolution and synthesis parameters', () => {
+  it.each([
+    ['vv-metan-whisper', '四国めたん', 'ささやき'],
+    ['vv-ryusei-whisper', '青山龍星', '囁き'],
+    ['vv-nurse-t-private', 'ナースロボ＿タイプＴ', '内緒話'],
+  ])(
+    'resolves the installed style for %s without falling back to normal',
+    async (voiceId, name, style) => {
+      const voice = voices.find((item) => item.id === voiceId)!;
+      const wav = Buffer.alloc(44);
+      wav.write('RIFF', 0);
+      wav.write('WAVE', 8);
+      mockFetch.mockImplementation(async (url) => {
+        if (String(url).endsWith('/speakers'))
+          return json([
+            {
+              name,
+              speaker_uuid: 'test-uuid',
+              styles: [
+                { name: 'ノーマル', id: 9000, type: 'talk' },
+                { name: style, id: 9001, type: 'talk' },
+              ],
+            },
+          ]);
+        if (String(url).includes('/audio_query?')) return json({ accent_phrases: [] });
+        return new Response(wav, { headers: { 'Content-Type': 'audio/wav' } });
+      });
+      const response = await post('/api/preview', {
+        voiceId,
+        text: '比較テスト',
+        recipe: makeRecipe(neutralProfile, voice),
+      });
+      expect(response.status).toBe(200);
+      expect(mockFetch.mock.calls[1][0]).toContain('speaker=9001');
+      expect(mockFetch.mock.calls[2][0]).toContain('speaker=9001');
+    },
+  );
   it('looks up installed style IDs and applies all six settings to an audio query', async () => {
     const voice = voices.find((v) => v.id === 'vv-ryusei')!;
     const recipe = makeRecipe(neutralProfile, voice);
