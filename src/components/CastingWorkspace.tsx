@@ -30,6 +30,8 @@ import {
   type AivisModelInfoResponse,
 } from '../../shared/aivis-model-info';
 import { AivisModelDetails } from './AivisModelDetails';
+import { VoiceLibrary } from './VoiceLibrary';
+import { loadLibraryCandidate, type VoiceLibraryEntry } from '../../shared/voice-library';
 
 type AudioEntry = {
   key: string;
@@ -78,6 +80,7 @@ export function CastingWorkspace({
   const [checkingModels, setCheckingModels] = useState(false);
   const modelRequestId = useRef(0);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [libraryDraft, setLibraryDraft] = useState<CastingEvaluation | null>(null);
   const [comparisonContext, setComparisonContext] = useState<{
     profile: Profile;
     characterInput: CharacterInput | null;
@@ -365,6 +368,22 @@ export function CastingWorkspace({
     );
   }
   const locked = disabled || busy || loading;
+  function loadVoice(entry: VoiceLibraryEntry, slot: 0 | 1) {
+    if (locked || generating.current) throw new Error('処理が完了してから読み込んでください。');
+    const next = loadLibraryCandidate(candidates, pair, entry, slot);
+    refreshId.current++;
+    setChecking(false);
+    clearAudio();
+    setCandidates(next.candidates);
+    setPair(next.pair);
+    setSelected(next.key);
+    setText(next.text);
+    setComparisonContext(next.context);
+    setReason('');
+    setOutcome('undecided');
+    setError('');
+    setNotice('採用声を読み込みました。音声は再生成してください。');
+  }
   return (
     <section
       className="casting-workspace comparison-panel"
@@ -656,8 +675,16 @@ export function CastingWorkspace({
           currentEvaluations={evaluations}
           disabled={locked}
           onResume={resume}
+          onRegister={(item) => setLibraryDraft(structuredClone(item))}
         />
       </div>
+      <VoiceLibrary
+        draft={libraryDraft}
+        disabled={locked}
+        inventory={inventory}
+        checking={checking}
+        onLoad={loadVoice}
+      />
       <p role="status">製品比較の評価記録：{evaluations.length}件 / 100件</p>
       {evaluations.length > 0 && (
         <details>
@@ -673,6 +700,15 @@ export function CastingWorkspace({
                 </p>
                 <p>セリフ：{item.text}</p>
                 <p>理由：{item.reason || '記入なし'}</p>
+                {(item.outcome === 'a' || item.outcome === 'b') && (
+                  <button
+                    className="secondary-button"
+                    disabled={locked}
+                    onClick={() => setLibraryDraft(structuredClone(item))}
+                  >
+                    採用声を登録
+                  </button>
+                )}
                 <p>
                   {item.generations
                     .map(

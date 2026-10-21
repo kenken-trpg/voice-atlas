@@ -25,10 +25,12 @@ export function CastingEvaluationWorkbench({
   currentEvaluations,
   disabled,
   onResume,
+  onRegister,
 }: {
   currentEvaluations: CastingEvaluation[];
   disabled: boolean;
   onResume: (item: CastingEvaluation) => void;
+  onRegister: (item: CastingEvaluation) => void;
 }) {
   const [records, setRecords] = useState<CastingEvaluation[]>([]);
   const [filters, setFilters] = useState<CastingFilters>({ ...defaultCastingFilters });
@@ -373,6 +375,15 @@ export function CastingEvaluationWorkbench({
                 >
                   この採用声で比較を再開
                 </button>
+                {adopted && (
+                  <button
+                    className="secondary-button"
+                    disabled={loading || disabled}
+                    onClick={() => onRegister(item)}
+                  >
+                    採用声を登録
+                  </button>
+                )}
                 {!adopted && <small>同程度・判断できない記録には採用した声がありません。</small>}
               </article>
             </li>
