@@ -6,8 +6,8 @@ import { evaluationSchema, type Evaluation } from './saved-recipe';
 import { axes, recipeFields } from './schema';
 
 export const maxEvaluationRecords = 1000;
-export const maxEvaluationFileBytes = 16 * 1024 * 1024;
-export const maxEvaluationBatchBytes = 32 * 1024 * 1024;
+export const maxEvaluationFileBytes = 32 * 1024 * 1024;
+export const maxEvaluationBatchBytes = 64 * 1024 * 1024;
 export const maxEvaluationFiles = 20;
 export const outcomeLabels = {
   a: 'Aを採用',
@@ -209,6 +209,9 @@ export function evaluationsCsv(records: EvaluationRecord[]) {
     'reason',
     'sample_text',
     'source_catalog_dates',
+    'input_mode',
+    'character_text',
+    'direction',
     ...axes.map((axis) => `profile_${axis}`),
     ...['a', 'b'].flatMap((label) => [
       `${label}_voice_id`,
@@ -250,6 +253,9 @@ export function evaluationsCsv(records: EvaluationRecord[]) {
       evaluation.reason,
       evaluation.sampleText,
       sourceCatalogDates.join(' / '),
+      evaluation.characterInput?.mode ?? null,
+      evaluation.characterInput?.text ?? null,
+      evaluation.characterInput?.direction ?? null,
       ...axes.map((axis) => evaluation.profile[axis]),
       ...evaluation.candidates.flatMap((candidate) => [
         candidate.voiceId,

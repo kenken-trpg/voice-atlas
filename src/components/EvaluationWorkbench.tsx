@@ -24,6 +24,7 @@ import type { Evaluation } from '../../shared/saved-recipe';
 import { axes, axisLabels, recipeFields } from '../../shared/schema';
 import { download } from '../lib/http';
 import { EvaluationProvenance } from './EvaluationProvenance';
+import { CharacterContext } from './CharacterContext';
 
 const pageSize = 25;
 export function EvaluationWorkbench({ currentEvaluations }: { currentEvaluations: Evaluation[] }) {
@@ -61,6 +62,8 @@ export function EvaluationWorkbench({ currentEvaluations }: { currentEvaluations
     const haystack = [
       evaluation.reason,
       evaluation.sampleText,
+      evaluation.characterInput?.text ?? '',
+      evaluation.characterInput?.direction ?? '',
       ...evaluation.candidates.map((candidate) => evaluationVoiceLabel(candidate.voiceId)),
     ]
       .join('\n')
@@ -96,9 +99,9 @@ export function EvaluationWorkbench({ currentEvaluations }: { currentEvaluations
       if (selected.length > maxEvaluationFiles)
         throw new Error('一度に読み込めるJSONは20ファイルまでです。');
       if (selected.some((file) => file.size > maxEvaluationFileBytes))
-        throw new Error('各JSONは16MB以下にしてください。');
+        throw new Error('各JSONは32MB以下にしてください。');
       if (selected.reduce((sum, file) => sum + file.size, 0) > maxEvaluationBatchBytes)
-        throw new Error('一度に読み込むJSONの合計は32MB以下にしてください。');
+        throw new Error('一度に読み込むJSONの合計は64MB以下にしてください。');
       const incoming: EvaluationRecord[] = [];
       for (const file of selected) {
         let input: unknown;
@@ -181,7 +184,7 @@ export function EvaluationWorkbench({ currentEvaluations }: { currentEvaluations
         </button>
       </div>
       <p className="footnote">
-        最大{maxEvaluationRecords}件。1回20ファイル・合計32MBまで、各ファイル16MBまで。
+        最大{maxEvaluationRecords}件。1回20ファイル・合計64MBまで、各ファイル32MBまで。
       </p>
       {error && (
         <p role="alert" className="evaluation-error">
@@ -433,6 +436,7 @@ export function EvaluationWorkbench({ currentEvaluations }: { currentEvaluations
                   。評価時に使ったカタログや推薦式のバージョンを特定する情報ではありません。
                 </p>
                 <EvaluationProvenance evaluation={evaluation} />
+                <CharacterContext input={evaluation.characterInput} />
               </details>
             </article>
           </li>

@@ -8,9 +8,11 @@ import {
   providerSchema,
   recipeSchema,
   recipeFields,
+  characterInputSchema,
 } from './schema';
 
 const voiceId = z.string().min(1).max(100);
+export const maxRecipeFileBytes = 4 * 1024 * 1024;
 const candidateSchema = z.object({ voiceId, parameters: recipeSchema });
 export const evaluationSchema = z
   .object({
@@ -21,6 +23,7 @@ export const evaluationSchema = z
     outcome: z.enum(['a', 'b', 'tie', 'undecided']),
     reason: z.string().max(1000),
     evidence: evaluationEvidenceSchema.optional(),
+    characterInput: characterInputSchema.optional(),
   })
   .refine(
     (item) =>
@@ -55,7 +58,13 @@ const savedRecipeSchema = z.discriminatedUnion('version', [
     version: z.literal(2),
     ...sessionFields,
   }),
-  z.object({ ...base, ...sessionFields, version: z.literal(3) }),
+  z.object({
+    ...base,
+    ...sessionFields,
+    version: z.literal(3),
+    characterInput: characterInputSchema.optional(),
+    profileInput: characterInputSchema.nullable().optional(),
+  }),
 ]);
 
 // Import only known catalog identities and validated numbers. URLs, guides and credits

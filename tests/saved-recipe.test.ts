@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { voices, catalogReviewedAt } from '../shared/catalog';
 import { makeRecipe } from '../shared/recommend';
 import { neutralProfile } from '../shared/schema';
-import { parseSavedRecipe } from '../shared/saved-recipe';
+import { parseSavedRecipe, maxRecipeFileBytes } from '../shared/saved-recipe';
 
 const parameters = makeRecipe(neutralProfile, voices[0]);
 const legacy = {
@@ -40,6 +40,58 @@ const session = () => ({
 });
 
 describe('saved casting recipes', () => {
+  it('retains draft and applied character inputs independently without importing images or URLs', () => {
+    const original = session();
+    const applied = { mode: 'text', text: '穏やかな司書。', direction: '丁寧に。' };
+    const draft = { ...applied, text: '威厳のある司書。' };
+    const saved = parseSavedRecipe({
+      ...original,
+      version: 3,
+      characterInput: { ...draft, image: 'private' },
+      profileInput: applied,
+      evaluations: [
+        { ...original.evaluations[0], characterInput: { ...applied, image: 'private' } },
+      ],
+    });
+    if (saved.version !== 3) throw new Error('expected v3');
+    expect(saved.characterInput).toEqual(draft);
+    expect(saved.profileInput).toEqual(applied);
+    expect(saved.evaluations[0].characterInput).toEqual(applied);
+    expect(JSON.stringify(saved)).not.toContain('private');
+    expect(parseSavedRecipe({ ...original, version: 3, profileInput: null })).toHaveProperty(
+      'profileInput',
+      null,
+    );
+    expect(() =>
+      parseSavedRecipe({
+        ...original,
+        version: 3,
+        characterInput: { ...draft, text: 'a'.repeat(2001) },
+      }),
+    ).toThrow('設定範囲');
+  });
+  it('keeps a full history of long settings within the import limit', () => {
+    const original = session();
+    const input = { mode: 'text', text: '設'.repeat(2000), direction: '指'.repeat(1000) };
+    const file = {
+      ...original,
+      version: 3,
+      characterInput: input,
+      profileInput: input,
+      evaluations: Array.from({ length: 100 }, () => ({
+        ...original.evaluations[0],
+        reason: '理'.repeat(1000),
+        sampleText: '声'.repeat(300),
+        characterInput: input,
+      })),
+    };
+    const serialized = JSON.stringify(file, null, 2);
+    expect(Buffer.byteLength(serialized)).toBeGreaterThan(1024 * 1024);
+    expect(Buffer.byteLength(serialized)).toBeLessThan(maxRecipeFileBytes);
+    const restored = parseSavedRecipe(JSON.parse(serialized));
+    if (restored.version !== 3) throw new Error('expected v3');
+    expect(restored.evaluations).toHaveLength(100);
+  });
   it('keeps all ten original candidate identities readable without new catalog metadata', () => {
     const identities = [
       ['vv-metan', 'VOICEVOX', '四国めたん', 'ノーマル'],

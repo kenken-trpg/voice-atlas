@@ -5,6 +5,7 @@ import { RecipeControls } from './RecipeControls';
 import { availabilityLabels, type VoiceAvailability } from '../../shared/voicevox';
 import { AvailabilityBadge, AvailabilityHelp } from './AvailabilityBadge';
 import { EvaluationProvenance } from './EvaluationProvenance';
+import { CharacterContext } from './CharacterContext';
 
 export function pauseOtherAudio(event: React.SyntheticEvent<HTMLAudioElement>) {
   document.querySelectorAll('audio').forEach((audio) => {
@@ -233,6 +234,7 @@ export function ComparisonPanel({
                     : '評価時スコア：記録なし'}
                 </p>
                 <EvaluationProvenance evaluation={item} />
+                <CharacterContext input={item.characterInput} />
                 <small>{new Date(item.recordedAt).toLocaleString('ja-JP')}</small>
               </li>
             ))}

@@ -5,7 +5,7 @@ import { analyzeRequestSchema, previewRequestSchema, recommendRequestSchema } fr
 import { recommend } from '../shared/recommend';
 import type { Config } from './config';
 import {
-  analyzeImage,
+  analyzeCharacter,
   AppError,
   capabilities,
   synthesize,
@@ -70,7 +70,7 @@ export function createApp(config: Config, fetcher: Fetcher = fetch) {
   });
   app.post('/api/analyze', async (req, res) => {
     const input = analyzeRequestSchema.parse(req.body);
-    const analysis = await runExclusive(() => analyzeImage(config, input, fetcher));
+    const analysis = await runExclusive(() => analyzeCharacter(config, input, fetcher));
     res.json({ analysis, provider: input.provider });
   });
   app.post('/api/preview', async (req, res) => {

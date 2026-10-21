@@ -41,6 +41,12 @@ export const analysisSchema = z.object({
   profile: profileSchema,
 });
 export type Analysis = z.infer<typeof analysisSchema>;
+export const characterInputSchema = z.object({
+  mode: z.enum(['image', 'text']),
+  text: z.string().max(2000),
+  direction: z.string().max(1000),
+});
+export type CharacterInput = z.infer<typeof characterInputSchema>;
 export const recipeSchema = z.object({
   speedScale: z.number().min(0.5).max(2),
   pitchScale: z.number().min(-0.15).max(0.15),
@@ -151,7 +157,7 @@ export interface Recommendation {
   guide: string[];
 }
 export interface Capabilities {
-  ollama: { ready: boolean; model: string; detail: string };
+  ollama: { ready: boolean; textReady: boolean; model: string; detail: string };
   openai: { ready: boolean; model: string };
   anthropic: { ready: boolean; model: string };
   gemini: { ready: boolean; model: string };

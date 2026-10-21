@@ -2170,3 +2170,30 @@ footer small {
 .evaluation-summary ul {
   padding-left: 20px;
 }
+
+.input-source-picker {
+  border: 0;
+  padding: 0;
+  margin: 0 0 16px;
+}
+.input-source-picker label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 6px 12px 0 0;
+  font-size: 12px;
+}
+#character-setting {
+  margin: 8px 0;
+}
+.input-change-note {
+  padding: 12px;
+  border-radius: 8px;
+  background: #fff0d9;
+  color: #79551e;
+  font-size: 12px;
+}
+.character-context {
+  overflow-wrap: anywhere;
+  margin: 12px 0;
+}

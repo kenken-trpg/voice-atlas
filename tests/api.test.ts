@@ -7,7 +7,7 @@ import type { Config } from '../server/config';
 import { makeRecipe } from '../shared/recommend';
 import { voices } from '../shared/catalog';
 import { neutralProfile } from '../shared/schema';
-import { analyzeImage, capabilities, sanitizeImage } from '../server/services';
+import { analyzeCharacter, capabilities, sanitizeImage } from '../server/services';
 
 const config: Config = {
   port: 3210,
@@ -259,6 +259,124 @@ describe('local API boundaries', () => {
   });
 });
 describe('vision provider contracts (mocked, no paid requests)', () => {
+  it.each(['ollama', 'openai', 'anthropic', 'gemini'] as const)(
+    'creates a text-only direction via %s without any image payload',
+    async (provider) => {
+      const textAnalysis = {
+        ...analysis,
+        cues: ['旅人を案内する司書'],
+        summary: '作者の設定から穏やかな司書という演出案です。',
+      };
+      const envelope =
+        provider === 'ollama'
+          ? { message: { content: JSON.stringify(textAnalysis) } }
+          : provider === 'openai'
+            ? {
+                status: 'completed',
+                output: [
+                  {
+                    type: 'message',
+                    content: [{ type: 'output_text', text: JSON.stringify(textAnalysis) }],
+                  },
+                ],
+              }
+            : provider === 'anthropic'
+              ? {
+                  type: 'message',
+                  stop_reason: 'end_turn',
+                  content: [{ type: 'text', text: JSON.stringify(textAnalysis) }],
+                }
+              : {
+                  candidates: [
+                    {
+                      finishReason: 'STOP',
+                      content: { parts: [{ text: JSON.stringify(textAnalysis) }] },
+                    },
+                  ],
+                };
+      mockFetch.mockImplementation(async () => json(envelope));
+      const response = await post('/api/analyze', {
+        provider,
+        inputMode: 'text',
+        characterText: '旅人を案内する司書。穏やかだが芯が強い。',
+        direction: '低めの声でゆっくり。',
+        consent: provider !== 'ollama',
+      });
+      expect(response.status).toBe(200);
+      expect((await response.json()).analysis).toEqual(textAnalysis);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const payload = JSON.parse(String(mockFetch.mock.calls[0][1]?.body));
+      const encoded = JSON.stringify(payload);
+      expect(encoded).toContain('旅人を案内する司書');
+      expect(encoded).toContain('低めの声でゆっくり');
+      expect(encoded).toContain('画像は提供されていません');
+      expect(encoded).toContain('作者が書いた設定のみ');
+      for (const marker of [
+        '"images"',
+        '"input_image"',
+        '"inlineData"',
+        '"base64"',
+        '"image_url"',
+        '"source"',
+      ])
+        expect(encoded).not.toContain(marker);
+      if (provider === 'openai') {
+        expect(payload.input[0].content).toHaveLength(1);
+        expect(payload.input[0].content[0].type).toBe('input_text');
+        expect(payload.store).toBe(false);
+        expect(payload.text.format.strict).toBe(true);
+      }
+    },
+  );
+  it('rejects empty text, unexpected images and oversized settings before model calls', async () => {
+    for (const input of [
+      { inputMode: 'text', characterText: '   ' },
+      { inputMode: 'text', characterText: '司書', image },
+      { inputMode: 'text', characterText: 'a'.repeat(2001) },
+      { inputMode: 'image', characterText: '司書' },
+      { inputMode: 'unknown', characterText: '司書' },
+    ])
+      expect((await post('/api/analyze', { provider: 'ollama', ...input })).status).toBe(400);
+    for (const provider of ['openai', 'anthropic', 'gemini']) {
+      const response = await post('/api/analyze', {
+        provider,
+        inputMode: 'text',
+        characterText: '司書',
+        consent: false,
+      });
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toContain('キャラクター設定と補足');
+    }
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+  it('prioritizes author settings when an image is also supplied', async () => {
+    mockFetch.mockImplementation(async () =>
+      json({ message: { content: JSON.stringify(analysis) } }),
+    );
+    const response = await post('/api/analyze', {
+      provider: 'ollama',
+      image,
+      characterText: '見た目より落ち着いた声。',
+      direction: '設定を優先。',
+    });
+    expect(response.status).toBe(200);
+    const sent = JSON.parse(String(mockFetch.mock.calls[0][1]?.body));
+    expect(sent.messages[0].content).toContain('作者の意図を優先');
+    expect(sent.messages[1].content).toContain('見た目より落ち着いた声');
+    expect(sent.messages[1].images).toHaveLength(1);
+  });
+  it('allows a local text-capable Ollama model without claiming image support', async () => {
+    mockFetch.mockImplementation(async (url) =>
+      String(url).endsWith('/api/show') ? json({ capabilities: ['completion'] }) : json([]),
+    );
+    expect((await capabilities(config, mockFetch)).ollama).toMatchObject({
+      ready: false,
+      textReady: true,
+    });
+    expect(
+      (await capabilities({ ...config, ollamaModel: 'example-cloud' }, mockFetch)).ollama,
+    ).toMatchObject({ ready: false, textReady: false });
+  });
   it('sends re-encoded JPEG and schema to local Ollama', async () => {
     mockFetch.mockResolvedValue(json({ message: { content: JSON.stringify(analysis) } }));
     const response = await post('/api/analyze', {
@@ -511,7 +629,7 @@ describe('Anthropic Claude vision (mocked, no paid requests)', () => {
   });
   it('rejects missing API keys without making an external request', async () => {
     await expect(
-      analyzeImage(
+      analyzeCharacter(
         { ...config, anthropicKey: '' },
         { provider: 'anthropic', image, direction: '', consent: true },
         mockFetch,
@@ -631,7 +749,7 @@ describe('Google Gemini vision (mocked, no paid requests)', () => {
   });
   it('rejects missing Gemini keys without external requests', async () => {
     await expect(
-      analyzeImage(
+      analyzeCharacter(
         { ...config, geminiKey: '' },
         { provider: 'gemini', image, direction: '', consent: true },
         mockFetch,

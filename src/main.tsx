@@ -32,11 +32,12 @@ import {
   type Preferences,
   type Profile,
   type Recipe,
+  type CharacterInput,
 } from '../shared/schema';
 import { catalogReviewedAt, voices } from '../shared/catalog';
 import { recommend } from '../shared/recommend';
 import { voiceAvailability, type VoiceAvailability } from '../shared/voicevox';
-import { parseSavedRecipe, type Evaluation } from '../shared/saved-recipe';
+import { parseSavedRecipe, maxRecipeFileBytes, type Evaluation } from '../shared/saved-recipe';
 import {
   captureEvaluationEvidence,
   engineInfoSchema,
@@ -48,6 +49,7 @@ import { HelpTip } from './components/HelpTip';
 import { VoiceMark } from './components/VoiceMark';
 import { RecipeControls } from './components/RecipeControls';
 import { AvailabilityBadge, AvailabilityHelp } from './components/AvailabilityBadge';
+import { CharacterContext } from './components/CharacterContext';
 import { jsonRequest, download } from './lib/http';
 import './styles.css';
 
@@ -88,6 +90,9 @@ function App() {
   const [mode, setMode] = useState<Mode>('manual');
   const [consent, setConsent] = useState(false);
   const [direction, setDirection] = useState('');
+  const [inputMode, setInputMode] = useState<CharacterInput['mode']>('image');
+  const [characterText, setCharacterText] = useState('');
+  const [profileInput, setProfileInput] = useState<CharacterInput | null>(null);
   const [profile, setProfile] = useState<Profile>({ ...neutralProfile });
   const [preferences, setPreferences] = useState<Preferences>({ engine: 'all', budget: 'all' });
   const [availableOnly, setAvailableOnly] = useState(false);
@@ -124,6 +129,19 @@ function App() {
   const detailRef = useRef<HTMLElement>(null);
   const externalProvider = mode !== 'manual' && mode !== 'ollama';
   const providerName = mode === 'manual' ? '手動' : providerLabels[mode];
+  const sentData =
+    inputMode === 'image'
+      ? characterText.trim()
+        ? '画像・キャラクター設定と補足'
+        : '画像と補足'
+      : 'キャラクター設定と補足';
+  function currentInput(): CharacterInput {
+    return { mode: inputMode, text: characterText, direction };
+  }
+  const inputChanged =
+    hasResults &&
+    profileInput !== null &&
+    JSON.stringify(profileInput) !== JSON.stringify(currentInput());
 
   async function refresh() {
     const generation = ++connectionGeneration.current;
@@ -212,6 +230,9 @@ function App() {
       if (generation !== imageGeneration.current) return;
       setImage({ url, name: file.name });
       setAnalysis(null);
+      setInputMode('image');
+      setProfileInput(null);
+      setConsent(false);
       setHasResults(false);
       clearAudio();
       setRecipes({});
@@ -238,6 +259,7 @@ function App() {
     if (next) setProfile({ ...next });
     setSource('manual');
     setAnalysis(null);
+    setProfileInput(currentInput());
     setEdited(false);
     setHasResults(true);
     setSelectedId(null);
@@ -249,12 +271,16 @@ function App() {
       manualSearch();
       return;
     }
-    if (!image) {
+    if (inputMode === 'image' && !image) {
       setError('解析したい人物やキャラクターの画像を選んでください。');
       return;
     }
+    if (inputMode === 'text' && !characterText.trim()) {
+      setError('役柄・性格・話し方などのキャラクター設定を入力してください。');
+      return;
+    }
     if (externalProvider && !consent) {
-      setError(`画像と補足の${providerName}への送信に同意してください。`);
+      setError(`${sentData}の${providerName}への送信に同意してください。`);
       return;
     }
     const controller = new AbortController();
@@ -264,7 +290,14 @@ function App() {
     try {
       const result = await jsonRequest<{ analysis: Analysis }>(
         '/api/analyze',
-        { provider: mode, image: image.url, direction, consent },
+        {
+          provider: mode,
+          inputMode,
+          ...(inputMode === 'image' ? { image: image!.url } : {}),
+          characterText,
+          direction,
+          consent,
+        },
         controller.signal,
       );
       if (!result.analysis.subjectFound) {
@@ -272,6 +305,7 @@ function App() {
         return;
       }
       setAnalysis(result.analysis);
+      setProfileInput(currentInput());
       setProfile(result.analysis.profile);
       setSource(mode);
       setEdited(false);
@@ -376,6 +410,8 @@ function App() {
           })),
           comparisonIds,
           evaluations,
+          characterInput: currentInput(),
+          profileInput,
         },
         null,
         2,
@@ -409,6 +445,7 @@ function App() {
       })) as Evaluation['candidates'],
       outcome,
       reason,
+      ...(profileInput ? { characterInput: { ...profileInput } } : {}),
       evidence: captureEvaluationEvidence(
         profile,
         comparisonIds,
@@ -432,7 +469,7 @@ function App() {
     setError('');
     setNotice('');
     try {
-      if (file.size > 1024 * 1024) throw new Error('レシピJSONは1MB以下にしてください。');
+      if (file.size > maxRecipeFileBytes) throw new Error('レシピJSONは4MB以下にしてください。');
       let input: unknown;
       try {
         input = JSON.parse(await file.text());
@@ -467,7 +504,17 @@ function App() {
       ++imageGeneration.current;
       setImage(null);
       setAnalysis(null);
-      setDirection('');
+      const restoredInput = saved.version === 3 ? saved.characterInput : undefined;
+      setInputMode(restoredInput?.mode ?? 'image');
+      setCharacterText(restoredInput?.text ?? '');
+      setDirection(restoredInput?.direction ?? '');
+      setProfileInput(
+        saved.version === 3
+          ? saved.profileInput !== undefined
+            ? saved.profileInput
+            : (restoredInput ?? null)
+          : null,
+      );
       setConsent(false);
       setMode('manual');
       setHasResults(true);
@@ -483,7 +530,11 @@ function App() {
     }
   }
   const disabled = Boolean(busy) || loadingImage || loadingRecipe;
-  const providerReady = mode === 'manual' || Boolean(caps?.[mode].ready);
+  const providerReady =
+    mode === 'manual' ||
+    (mode === 'ollama' && inputMode === 'text'
+      ? Boolean(caps?.ollama.textReady ?? caps?.ollama.ready)
+      : Boolean(caps?.[mode].ready));
   return (
     <>
       <header className="site-header">
@@ -506,7 +557,7 @@ function App() {
               aria-expanded={settingsOpen}
             >
               <span
-                className={`status-dot ${caps?.ollama.ready || caps?.openai.ready || caps?.anthropic?.ready || caps?.gemini?.ready ? 'online' : ''}`}
+                className={`status-dot ${caps?.ollama.ready || caps?.ollama.textReady || caps?.openai.ready || caps?.anthropic?.ready || caps?.gemini?.ready ? 'online' : ''}`}
               />
               <span>接続設定</span>
               <SlidersHorizontal size={15} />
@@ -527,7 +578,7 @@ function App() {
               <p>
                 そのキャラクターに似合う声を、見つけよう。
                 <br className="mobile-break" />
-                画像から、音声ソフトと調声のレシピへ。
+                画像やキャラクター設定から、音声ソフトと調声のレシピへ。
               </p>
             </div>
             <div className="hero-note">
@@ -595,10 +646,16 @@ function App() {
             <div className="connection-grid">
               <div>
                 <strong>
-                  <span className={`status-dot ${caps?.ollama.ready ? 'online' : ''}`} />
+                  <span
+                    className={`status-dot ${caps?.ollama.ready || caps?.ollama.textReady ? 'online' : ''}`}
+                  />
                   Ollama
                 </strong>
-                <p>{caps?.ollama.detail || '接続を確認中'}</p>
+                <p>
+                  {caps?.ollama.textReady && !caps.ollama.ready
+                    ? '設定テキストからの演出案を利用できます（画像入力は未対応）'
+                    : caps?.ollama.detail || '接続を確認中'}
+                </p>
                 <code>ollama pull gemma3:4b</code>
                 <small>
                   モデル名は .env の OLLAMA_MODEL で変更できます。クラウドモデルは対象外です。
@@ -689,83 +746,132 @@ function App() {
             <section className="panel image-panel">
               <div className="section-heading">
                 <h2>
-                  <span className="step">01</span>イメージを選ぶ
+                  <span className="step">01</span>キャラクターを指定
                 </h2>
-                <span className="muted-tag">PNG / JPG / WebP</span>
+                <span className="muted-tag">
+                  {inputMode === 'text' ? '画像不要' : 'PNG / JPG / WebP'}
+                </span>
               </div>
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                onChange={(event) => void loadImage(event.target.files?.[0])}
-                className="visually-hidden"
-                id="character-image"
-                disabled={disabled}
-              />
-              <div
-                className={`upload-zone ${image ? 'has-image' : ''} ${dragging ? 'dragging' : ''}`}
-                onDragOver={(event) => {
-                  event.preventDefault();
-                  if (!disabled) setDragging(true);
-                }}
-                onDragLeave={() => setDragging(false)}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  setDragging(false);
-                  if (!disabled) void loadImage(event.dataTransfer.files[0]);
-                }}
-              >
-                {image ? (
-                  <>
-                    <img src={image.url} alt="選択した人物またはキャラクターの画像" />
-                    <div className="image-toolbar">
-                      <span>{image.name}</span>
+              <fieldset className="input-source-picker" disabled={disabled}>
+                <legend className="field-label">入力するもの</legend>
+                {(
+                  [
+                    { value: 'image', label: '画像と設定' },
+                    { value: 'text', label: '設定テキストのみ' },
+                  ] as const
+                ).map((item) => (
+                  <label key={item.value}>
+                    <input
+                      type="radio"
+                      name="input-source"
+                      value={item.value}
+                      checked={inputMode === item.value}
+                      onChange={() => {
+                        setInputMode(item.value);
+                        setConsent(false);
+                        setError('');
+                      }}
+                    />
+                    {item.label}
+                  </label>
+                ))}
+              </fieldset>
+              <div hidden={inputMode !== 'image'}>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  onChange={(event) => void loadImage(event.target.files?.[0])}
+                  className="visually-hidden"
+                  id="character-image"
+                  disabled={disabled}
+                />
+                <div
+                  className={`upload-zone ${image ? 'has-image' : ''} ${dragging ? 'dragging' : ''}`}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    if (!disabled) setDragging(true);
+                  }}
+                  onDragLeave={() => setDragging(false)}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    setDragging(false);
+                    if (!disabled) void loadImage(event.dataTransfer.files[0]);
+                  }}
+                >
+                  {image ? (
+                    <>
+                      <img src={image.url} alt="選択した人物またはキャラクターの画像" />
+                      <div className="image-toolbar">
+                        <span>{image.name}</span>
+                        <button
+                          className="icon-button"
+                          disabled={disabled}
+                          aria-label="画像を削除"
+                          onClick={() => {
+                            ++imageGeneration.current;
+                            setImage(null);
+                            setAnalysis(null);
+                            setHasResults(false);
+                            clearAudio();
+                          }}
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
                       <button
-                        className="icon-button"
+                        className="replace-image"
                         disabled={disabled}
-                        aria-label="画像を削除"
-                        onClick={() => {
-                          ++imageGeneration.current;
-                          setImage(null);
-                          setAnalysis(null);
-                          setHasResults(false);
-                          clearAudio();
-                        }}
+                        onClick={() => fileRef.current?.click()}
                       >
-                        <X size={16} />
+                        <ImagePlus size={15} />
+                        画像を変更
                       </button>
-                    </div>
+                    </>
+                  ) : (
                     <button
-                      className="replace-image"
-                      disabled={disabled}
+                      className="upload-button"
                       onClick={() => fileRef.current?.click()}
+                      disabled={disabled}
                     >
-                      <ImagePlus size={15} />
-                      画像を変更
+                      <span className="upload-symbol">
+                        {loadingImage ? (
+                          <LoaderCircle size={29} className="spin" />
+                        ) : (
+                          <ImagePlus size={29} strokeWidth={1.4} />
+                        )}
+                      </span>
+                      <strong>キャラクターを、ここに。</strong>
+                      <span>画像をドロップ、またはクリックして選択</span>
+                      <small>8MBまで · 25メガピクセル以下の静止画</small>
                     </button>
-                  </>
-                ) : (
-                  <button
-                    className="upload-button"
-                    onClick={() => fileRef.current?.click()}
-                    disabled={disabled}
-                  >
-                    <span className="upload-symbol">
-                      {loadingImage ? (
-                        <LoaderCircle size={29} className="spin" />
-                      ) : (
-                        <ImagePlus size={29} strokeWidth={1.4} />
-                      )}
-                    </span>
-                    <strong>キャラクターを、ここに。</strong>
-                    <span>画像をドロップ、またはクリックして選択</span>
-                    <small>8MBまで · 25メガピクセル以下の静止画</small>
-                  </button>
-                )}
+                  )}
+                </div>
+                <p className="privacy-note">
+                  <span className="tiny-dot" />
+                  画像はこのアプリのディスクには保存しません。
+                </p>
               </div>
-              <p className="privacy-note">
-                <span className="tiny-dot" />
-                画像はこのアプリのディスクには保存しません。
+              <label className="field-label" htmlFor="character-setting">
+                キャラクター設定{' '}
+                <span>
+                  {inputMode === 'text' && mode !== 'manual' ? '必須' : '任意'}・2000文字まで
+                </span>
+              </label>
+              <textarea
+                id="character-setting"
+                rows={6}
+                maxLength={2000}
+                value={characterText}
+                disabled={disabled}
+                onChange={(event) => {
+                  setCharacterText(event.target.value);
+                  setConsent(false);
+                }}
+                placeholder="例：図書館で旅人を案内する司書。穏やかだが芯が強い。丁寧な言葉遣いで、低めの声でゆっくり話す。"
+              />
+              <p className="footnote">
+                役柄・性格・背景・話し方など、作者の設定を書きます。AIを選ぶと、この設定から声の演出案を作れます。
               </p>
             </section>
             <section className="panel direction-panel">
@@ -806,14 +912,14 @@ function App() {
                 <p className="mode-note">
                   下のスライダーから候補を探します。
                   <br />
-                  手動モードでは画像を解析・送信しません。
+                  手動モードでは画像・キャラクター設定を解析・送信しません。設定の意図は4軸に手動で反映してください。
                 </p>
               ) : (
                 <>
                   <p className="mode-note">
                     {mode === 'ollama'
-                      ? '画像と補足をこのPCのOllamaへ送信し、声の演出案を作ります。'
-                      : `画像と補足を${providerName} APIへ送信します。APIキーはサーバー内で管理します。`}
+                      ? `${sentData}をこのPCのOllamaへ送信し、声の演出案を作ります。`
+                      : `${sentData}を${providerName} APIへ送信します。APIキーはサーバー内で管理します。`}
                   </p>
                   <label className="field-label" htmlFor="direction">
                     演出の補足 <span>任意</span>
@@ -822,7 +928,10 @@ function App() {
                     id="direction"
                     value={direction}
                     maxLength={1000}
-                    onChange={(event) => setDirection(event.target.value)}
+                    onChange={(event) => {
+                      setDirection(event.target.value);
+                      setConsent(false);
+                    }}
                     disabled={disabled}
                     placeholder="例：静かな案内役。低めの声で、丁寧に話してほしい。"
                     rows={3}
@@ -836,7 +945,7 @@ function App() {
                         onChange={(event) => setConsent(event.target.checked)}
                       />
                       <span>
-                        画像と補足を{providerName}
+                        {sentData}を{providerName}
                         に送信することに同意する（API利用料がかかる場合があります）
                       </span>
                     </label>
@@ -889,18 +998,24 @@ function App() {
                 disabled={
                   disabled ||
                   (mode !== 'manual' &&
-                    (!image || !providerReady || (externalProvider && !consent)))
+                    ((inputMode === 'image' ? !image : !characterText.trim()) ||
+                      !providerReady ||
+                      (externalProvider && !consent)))
                 }
               >
                 {busy === 'analysis' ? (
                   <>
                     <LoaderCircle size={17} className="spin" />
-                    画像を解析しています…
+                    演出案を作成しています…
                   </>
                 ) : (
                   <>
                     <Sparkles size={17} />
-                    {mode === 'manual' ? 'このイメージで声を探す' : '画像から声の演出案を作る'}
+                    {mode === 'manual'
+                      ? 'このイメージで声を探す'
+                      : inputMode === 'image'
+                        ? '画像から声の演出案を作る'
+                        : '設定から声の演出案を作る'}
                     <ArrowRight size={17} />
                   </>
                 )}
@@ -939,7 +1054,7 @@ function App() {
                 <span className="eyebrow">FIND THEIR VOICE</span>
                 <h2>まだ声のない、その物語に。</h2>
                 <p>
-                  画像から演出を考えたり、好みの声から探したり。
+                  画像やキャラクター設定から演出を考えたり、好みの声から探したり。
                   <br />
                   既存の音声ソフトで使える、声づくりの出発点を見つけましょう。
                 </p>
@@ -976,15 +1091,29 @@ function App() {
                     </h2>
                   </div>
                   <span className="source-badge">
-                    {source === 'manual' ? '手動で作成' : `${providerLabels[source]}で解析`}
+                    {source === 'manual'
+                      ? '手動で作成'
+                      : `${providerLabels[source]}で解析${profileInput?.mode === 'text' ? '（設定テキスト）' : ''}`}
                     {edited ? '・調整済み' : ''}
                   </span>
                 </div>
+                {inputChanged && (
+                  <p className="input-change-note" role="status">
+                    入力した設定が、現在の声の方向を作ったときから変わっています。反映するには
+                    {mode === 'manual' ? '4軸を調整して検索' : '演出案を再作成'}
+                    してください。保存には編集中の設定も含めます。
+                  </p>
+                )}
                 {analysis && (
                   <div className="analysis-card">
                     <Sparkles size={19} />
                     <div>
                       <p>{analysis.summary}</p>
+                      <small>
+                        {profileInput?.mode === 'text'
+                          ? '作者の設定からの要点'
+                          : '画像の視覚的な要素'}
+                      </small>
                       <div className="cue-tags">
                         {analysis.cues.map((cue, index) => (
                           <span key={index}>{cue}</span>
@@ -994,6 +1123,7 @@ function App() {
                     </div>
                   </div>
                 )}
+                <CharacterContext input={profileInput ?? undefined} />
                 <div className="filters">
                   <span>
                     <span className="step">03</span>
@@ -1373,7 +1503,7 @@ function App() {
               <div>
                 <h3>イメージを用意する</h3>
                 <p>
-                  一人の人物・キャラクターの画像を選びます。手動なら、画像なしでも始められます。
+                  一人の人物・キャラクターの画像か、作者が書いた設定を用意します。手動なら、4軸の指定だけでも始められます。
                 </p>
               </div>
             </li>

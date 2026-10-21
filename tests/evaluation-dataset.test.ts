@@ -85,6 +85,7 @@ describe('local evaluation datasets', () => {
       record({ sampleText: '別のセリフ' }),
       record({ profile: { ...metan.profile, energy: 0 } }),
       record({ recordedAt: '2026-10-21T01:00:00Z' }),
+      record({ characterInput: { mode: 'text', text: '穏やかな司書。', direction: 'ゆっくり。' } }),
       record({
         candidates: [...evaluation().candidates].reverse() as Evaluation['candidates'],
         outcome: 'b',
@@ -92,7 +93,7 @@ describe('local evaluation datasets', () => {
       { evaluation: changedRecipe, sourceCatalogDates: [] },
     ];
     const merged = mergeEvaluationRecords([first], incoming);
-    expect(merged.records).toHaveLength(7);
+    expect(merged.records).toHaveLength(8);
     expect(merged.records[0].evaluation.recordedAt).toBe('2026-10-21T01:00:00Z');
     expect(first.evaluation.candidates[0].parameters.speedScale).not.toBe(0.7);
   });
@@ -166,12 +167,18 @@ describe('local evaluation datasets', () => {
     expect(full[0].sourceCatalogDates).toEqual(['2026-10-20']);
   });
   it('exports CSV with exact conditions, multiline quoting and neutralized text formulas', () => {
-    const input = record({ reason: ' =SUM("1",2)\n次の行', sampleText: '@SUM(1)' });
+    const input = record({
+      reason: ' =SUM("1",2)\n次の行',
+      sampleText: '@SUM(1)',
+      characterInput: { mode: 'text', text: '=作者の設定', direction: '+演出指示' },
+    });
     input.evaluation.candidates[0].parameters.pitchScale = -0.1;
     const csv = evaluationsCsv([input]);
     expect(csv.startsWith('\uFEFF')).toBe(true);
     expect(csv).toContain('"\' =SUM(""1"",2)\n次の行"');
     expect(csv).toContain('"\'@SUM(1)"');
+    expect(csv).toContain('"\'=作者の設定"');
+    expect(csv).toContain('"\'+演出指示"');
     expect(csv).toContain('"-0.1"');
     expect(csv).toContain('"current_catalog_reviewed_at"');
     expect(csv).toContain('"a_speedScale"');
