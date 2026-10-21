@@ -2216,6 +2216,27 @@ footer small {
   margin: 1.25rem 0;
   overflow-wrap: anywhere;
 }
+.library-comparison {
+  margin: 1.25rem 0;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  min-width: 0;
+}
+.library-differences {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+}
+.library-comparison input[type='radio'] {
+  width: auto;
+  flex: none;
+  margin-top: 0.4em;
+}
+.library-comparison label:has(input[type='radio']) {
+  display: flex;
+  align-items: flex-start;
+}
 .voice-library fieldset,
 .voice-variation {
   min-width: 0;

@@ -109,6 +109,7 @@ export function CastingWorkspace({
   const refreshId = useRef(0);
   const generating = useRef(false);
   const [busy, setBusy] = useState(false);
+  const [libraryComparing, setLibraryComparing] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
@@ -402,7 +403,7 @@ export function CastingWorkspace({
       '採用した声と当時の比較条件を戻しました。音声は再生成してください。過去の評価は保持しています。',
     );
   }
-  const locked = disabled || busy || loading;
+  const locked = disabled || busy || loading || libraryComparing;
   function loadVoice(entry: VoiceLibraryEntry, slot: 0 | 1) {
     if (locked || generating.current) throw new Error('処理が完了してから読み込んでください。');
     const next = loadLibraryCandidate(candidates, pair, entry, slot);
@@ -794,6 +795,9 @@ export function CastingWorkspace({
         inventory={inventory}
         checking={checking}
         onLoad={loadVoice}
+        active={open}
+        currentModel={currentModel}
+        onComparingChange={setLibraryComparing}
       />
       <p role="status">製品比較の評価記録：{evaluations.length}件 / 100件</p>
       {evaluations.length > 0 && (

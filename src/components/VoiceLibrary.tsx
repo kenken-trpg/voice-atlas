@@ -16,9 +16,12 @@ import {
   castingRecipeFields,
   type CastingEvaluation,
   type CastingInventory,
+  type CastingCandidate,
 } from '../../shared/casting';
 import { download } from '../lib/http';
 import { AivisModelDetails } from './AivisModelDetails';
+import { LibraryComparison } from './LibraryComparison';
+import { type AivisModelInfo } from '../../shared/aivis-model-info';
 export type VoiceLibraryHandle = { add: (entry: VoiceLibraryEntry) => void };
 
 export function VoiceLibrary({
@@ -28,6 +31,9 @@ export function VoiceLibrary({
   checking,
   onLoad,
   ref: handleRef,
+  active,
+  currentModel,
+  onComparingChange,
 }: {
   draft: CastingEvaluation | null;
   disabled: boolean;
@@ -35,6 +41,9 @@ export function VoiceLibrary({
   checking: boolean;
   onLoad: (entry: VoiceLibraryEntry, slot: 0 | 1) => void;
   ref?: Ref<VoiceLibraryHandle>;
+  active: boolean;
+  currentModel: (candidate: CastingCandidate) => AivisModelInfo | undefined;
+  onComparingChange: (busy: boolean) => void;
 }) {
   const [initial] = useState(() => {
     try {
@@ -67,6 +76,7 @@ export function VoiceLibrary({
   const importing = useRef(false);
   const ref = useRef<HTMLInputElement>(null);
   const details = useRef<HTMLDetailsElement>(null);
+  const [libraryOpen, setLibraryOpen] = useState(false);
   useEffect(() => {
     if (draft) {
       setEditing(null);
@@ -163,7 +173,13 @@ export function VoiceLibrary({
         .includes(query.toLocaleLowerCase()),
   );
   return (
-    <details ref={details} className="voice-library">
+    <details
+      ref={details}
+      className="voice-library"
+      onToggle={(event) => {
+        if (event.target === event.currentTarget) setLibraryOpen(event.currentTarget.open);
+      }}
+    >
       <summary>キャラクターの採用声ライブラリ</summary>
       <section aria-label="採用声ライブラリ">
         <p>
@@ -272,6 +288,15 @@ export function VoiceLibrary({
         <p role="status">
           採用声：{visible.length}件 / 登録{entries.length}件
         </p>
+        <LibraryComparison
+          entries={entries}
+          disabled={locked}
+          active={active && libraryOpen}
+          inventory={inventory}
+          checking={checking}
+          currentModel={currentModel}
+          onBusyChange={onComparingChange}
+        />
         <ol className="evaluation-history">
           {visible.map((entry) => {
             const candidate = libraryCandidate(entry);
