@@ -164,3 +164,9 @@ GitHub ActionsはmainへのpushとPull Requestで実行し、同じrefの古い�
 ブラウザーテストはChromiumのデスクトップ・モバイルの2構成を維持し、CIのワーカー数は2。実行に使うheadless shellだけを `npx playwright install --with-deps --only-shell chromium` でインストールする。[Playwright公式のブラウザー設定](https://playwright.dev/docs/browsers)に沿い、不要なフルブラウザーの取得を省く。ブラウザーキャッシュは[公式CIガイド](https://playwright.dev/docs/ci)が推奨していないため追加しない。
 
 実際のGitHubランナーでの所要時間の短縮率は未計測。
+
+## キャスティング表
+
+`shared/casting-board.ts` は作品・キャラクター・使用場面の組み合わせを一意とする確定設定を定義する。`voice-atlas-casting-board` v1 JSONと専用localStorageキーで既存ライブラリ・比較JSONから分離し、最大100件・8MiBに制限する。比較記録全体を検証してコピーするため、後の元登録・履歴変更に依存しない。UUID・組み合わせの重複、不正な選択ID、生成情報の製品不一致もスキーマで拒否する。
+
+`CastingBoard` は設定比較履歴から登録し、同じ組み合わせへの変更には明示的な置き換え確認を表示する。JSON読み込みは追加方式で、競合・容量超過・保存失敗時は一部を適用しない。ブラウザ保存に成功してから画面状態を更新する。候補への読み込みはコピーした設定と比較時のセリフを既存のライブラリ読み込み経路に渡す。生成・モデル情報は比較試聴時の情報を使い、元登録の古い情報で補わない。読み込み自体では音声生成を行わず、現在の話者の可用性・カタログ検証を維持する。

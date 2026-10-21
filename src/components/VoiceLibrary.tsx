@@ -296,6 +296,7 @@ export function VoiceLibrary({
           checking={checking}
           currentModel={currentModel}
           onBusyChange={onComparingChange}
+          onLoad={onLoad}
         />
         <ol className="evaluation-history">
           {visible.map((entry) => {

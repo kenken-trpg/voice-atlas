@@ -24,6 +24,7 @@ import { type AivisModelInfo } from '../../shared/aivis-model-info';
 import { download } from '../lib/http';
 import { pauseOtherAudio } from './ComparisonPanel';
 import { AivisModelDetails } from './AivisModelDetails';
+import { CastingBoard } from './CastingBoard';
 
 type Preview = { key: string; url: string; audition: LibraryAudition };
 const emptySession = (): LibraryComparisonSession => ({
@@ -48,6 +49,7 @@ export function LibraryComparison({
   checking,
   currentModel,
   onBusyChange,
+  onLoad,
 }: {
   entries: VoiceLibraryEntry[];
   disabled: boolean;
@@ -56,6 +58,7 @@ export function LibraryComparison({
   checking: boolean;
   currentModel: (candidate: CastingCandidate) => AivisModelInfo | undefined;
   onBusyChange: (busy: boolean) => void;
+  onLoad: (entry: VoiceLibraryEntry, slot: 0 | 1) => void;
 }) {
   const [initial] = useState(() => {
     try {
@@ -313,6 +316,7 @@ export function LibraryComparison({
   return (
     <section ref={sectionRef} className="library-comparison" aria-label="保存した設定の比較">
       <h3>保存した設定を聴き比べる</h3>
+      <CastingBoard records={records} disabled={locked} onLoad={onLoad} />
       <p>
         異なる2件の登録を選びます。同じ話者・スタイルの調声違いも比較できます。読み込んだ設定はコピーとして保持し、その後の登録の編集・削除は比較に反映しません。
       </p>
