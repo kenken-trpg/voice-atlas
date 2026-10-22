@@ -83,47 +83,13 @@ export function ScriptAudioExport({
     player.current?.pause();
     let wavUrl: string | undefined, jsonUrl: string | undefined;
     try {
-      const [
-        {
-          checkJoinedFrames,
-          encodeJoinedWav,
-          joinedSampleRate,
-          maxJoinInputBytes,
-          normalizePcm,
-          outputFrames,
-          readPcmWav,
-        },
-        { makeScriptAudioManifest },
-      ] = await Promise.all([import('../../shared/wav'), import('../../shared/script-audio')]);
+      const { prepareScriptAudio } = await import('../lib/script-audio-export');
+      const { bytes, manifest } = await prepareScriptAudio(
+        script,
+        selected.map(({ blob, audition }) => ({ blob, audition })),
+        request.signal,
+      );
       request.signal.throwIfAborted();
-      if (selected.reduce((bytes, source) => bytes + source.blob.size, 0) > maxJoinInputBytes)
-        throw new Error(
-          '結合元の音声は合計64MiBまでです。台本を分けるか、行別WAVを保存してください。',
-        );
-      const parts: Int16Array[] = [],
-        inputs: Parameters<typeof makeScriptAudioManifest>[1] = [];
-      const gapFrames = Math.round((script.gapMs * joinedSampleRate) / 1000);
-      let totalFrames = gapFrames * (selected.length - 1);
-      for (const source of selected) {
-        // Yield between rows so cancellation and closing the panel can take effect.
-        await new Promise((resolve) => setTimeout(resolve, 0));
-        request.signal.throwIfAborted();
-        const wav = readPcmWav(new Uint8Array(await source.blob.arrayBuffer()));
-        request.signal.throwIfAborted();
-        totalFrames += outputFrames(wav);
-        checkJoinedFrames(totalFrames);
-        const samples = normalizePcm(wav);
-        parts.push(samples);
-        inputs.push({
-          frames: samples.length,
-          source: { sampleRate: wav.sampleRate, channels: wav.channels },
-          audition: source.audition,
-        });
-      }
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      request.signal.throwIfAborted();
-      const bytes = encodeJoinedWav(parts, gapFrames);
-      const manifest = makeScriptAudioManifest(script, inputs);
       wavUrl = URL.createObjectURL(
         new Blob([bytes as Uint8Array<ArrayBuffer>], { type: 'audio/wav' }),
       );

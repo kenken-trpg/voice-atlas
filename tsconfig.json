@@ -20,6 +20,8 @@
     "vite.config.ts",
     "playwright.config.ts",
     "e2e",
+    "benchmarks",
+    "playwright.benchmark.config.ts",
     "vitest.config.ts"
   ]
 }
