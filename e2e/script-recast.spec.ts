@@ -44,6 +44,15 @@ const script = {
 };
 const storedLibrary = serializeScriptLibrary([makeScriptLibraryEntry(script, '作品', '元台本')]);
 async function open(page: Page) {
+  await page.addInitScript(() => {
+    const revoked: string[] = [];
+    Object.assign(window, { revokedUrls: revoked });
+    const revoke = URL.revokeObjectURL.bind(URL);
+    URL.revokeObjectURL = (url) => {
+      revoked.push(url);
+      revoke(url);
+    };
+  });
   await page.addInitScript(
     ({ scriptKey, script, boardKey, board, libraryKey, library }) => {
       localStorage.setItem(scriptKey, script);
@@ -263,4 +272,121 @@ test('invalidates stale reviews, permits offline settings without generation and
   await expect(panel.locator(':scope > ol audio')).toHaveCount(2);
   expect(calls).toBe(3);
   await expect(panel.getByLabel('台本の第1行の試聴', { exact: true })).toHaveAttribute('src', url!);
+});
+test('compares retained before/after audio and undoes settings without requests or losing unrelated edits', async ({
+  page,
+}, testInfo) => {
+  let calls = 0;
+  await page.route('**/api/casting/preview', (route) => {
+    calls++;
+    return route.fulfill({ contentType: 'audio/wav', body: audioBody });
+  });
+  const { panel, recast } = await open(page);
+  await panel.getByRole('button', { name: '未生成の行を台本順に生成', exact: true }).click();
+  await expect(panel.locator(':scope > ol audio')).toHaveCount(4);
+  const oldUrl = await panel.getByLabel('台本の第1行の試聴', { exact: true }).getAttribute('src');
+  await prepare(recast);
+  await recast.getByRole('button', { name: '確認した声の差し替えを反映', exact: true }).click();
+  const history = panel.getByRole('region', { name: '声の差し替え前後の比較', exact: true });
+  await expect(history.getByLabel('記録第1行の差し替え前の試聴', { exact: true })).toHaveAttribute(
+    'src',
+    oldUrl!,
+  );
+  await expect
+    .poll(() =>
+      history
+        .getByLabel('記録第1行の差し替え前の試聴', { exact: true })
+        .evaluate((audio: HTMLAudioElement) => audio.readyState),
+    )
+    .toBeGreaterThan(0);
+  expect(await revoked(page)).not.toContain(oldUrl);
+  await panel.getByRole('button', { name: '差し替えた行の未生成音声を生成', exact: true }).click();
+  await expect(history.getByLabel('記録第1行の差し替え後の試聴', { exact: true })).toBeVisible();
+  const newUrl = await history
+    .getByLabel('記録第1行の差し替え後の試聴', { exact: true })
+    .getAttribute('src');
+  await history.screenshot({ path: testInfo.outputPath('recast-history.png') });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await panel.getByLabel('第3行のセリフ', { exact: true }).fill('対象外の編集');
+  await history.getByRole('button', { name: '直前の声の差し替えを取り消す', exact: true }).click();
+  await expect(history).toHaveCount(0);
+  await expect(panel.getByLabel('台本の第1行の試聴', { exact: true })).toHaveAttribute(
+    'src',
+    oldUrl!,
+  );
+  await expect(panel.getByLabel('第3行のセリフ', { exact: true })).toHaveValue('対象外の編集');
+  expect(calls).toBe(6);
+  const saved = await exported(page, panel);
+  expect(saved.lines[0]).toEqual(script.lines[0]);
+  expect(saved.lines[1]).toEqual(script.lines[1]);
+  expect(await page.evaluate((key) => localStorage.getItem(key), scriptLibraryStorageKey)).toBe(
+    storedLibrary,
+  );
+  expect(await revoked(page)).toContain(newUrl);
+});
+test('blocks undo after target edits and discards only the retained old audio', async ({
+  page,
+}) => {
+  await page.route('**/api/casting/preview', (route) =>
+    route.fulfill({ contentType: 'audio/wav', body: audioBody }),
+  );
+  const { panel, recast } = await open(page);
+  await panel.getByRole('button', { name: '未生成の行を台本順に生成', exact: true }).click();
+  await expect(panel.locator(':scope > ol audio')).toHaveCount(4);
+  const oldUrl = await panel.getByLabel('台本の第1行の試聴', { exact: true }).getAttribute('src');
+  const otherUrl = await panel.getByLabel('台本の第4行の試聴', { exact: true }).getAttribute('src');
+  await prepare(recast);
+  await recast.getByRole('button', { name: '確認した声の差し替えを反映', exact: true }).click();
+  await panel.getByLabel('第1行のセリフ', { exact: true }).fill('新しい編集');
+  const history = panel.getByRole('region', { name: '声の差し替え前後の比較', exact: true });
+  await expect(
+    history.getByRole('button', { name: '直前の声の差し替えを取り消す', exact: true }),
+  ).toBeDisabled();
+  await expect(history.getByRole('status')).toContainText('編集されています');
+  await history.getByRole('button', { name: '差し替え前の記録を破棄', exact: true }).click();
+  await expect(history).toHaveCount(0);
+  expect(await revoked(page)).toContain(oldUrl);
+  expect(await revoked(page)).not.toContain(otherUrl);
+  await expect(panel.getByLabel('第1行のセリフ', { exact: true })).toHaveValue('新しい編集');
+});
+
+async function revoked(page: Page) {
+  return page.evaluate(() => (window as unknown as { revokedUrls: string[] }).revokedUrls);
+}
+test('retains shared audio on discard, keeps one undo record and clears it on an actual script switch', async ({
+  page,
+}) => {
+  await page.route('**/api/casting/preview', (route) =>
+    route.fulfill({ contentType: 'audio/wav', body: audioBody }),
+  );
+  const { panel, recast } = await open(page);
+  await panel.getByRole('button', { name: '未生成の行を台本順に生成', exact: true }).click();
+  await expect(panel.locator(':scope > ol audio')).toHaveCount(4);
+  const original = await panel.getByLabel('台本の第1行の試聴', { exact: true }).getAttribute('src');
+  await prepare(recast, metadata.id, scriptSettingKey(script.lines[0]));
+  await recast.getByRole('button', { name: '確認した声の差し替えを反映', exact: true }).click();
+  const history = panel.getByRole('region', { name: '声の差し替え前後の比較', exact: true });
+  await history.getByRole('button', { name: '差し替え前の記録を破棄', exact: true }).click();
+  expect(await revoked(page)).not.toContain(original);
+  await expect(panel.getByLabel('台本の第1行の試聴', { exact: true })).toHaveAttribute(
+    'src',
+    original!,
+  );
+  await prepare(recast);
+  await recast.getByRole('button', { name: '確認した声の差し替えを反映', exact: true }).click();
+  await prepare(recast, base.assignments[0].id);
+  await recast.getByRole('button', { name: '確認した声の差し替えを反映', exact: true }).click();
+  expect(await revoked(page)).toContain(original);
+  await expect(history.getByLabel('記録第1行の差し替え前の試聴', { exact: true })).toHaveCount(0);
+  await history.getByRole('button', { name: '直前の声の差し替えを取り消す', exact: true }).click();
+  const restored = await exported(page, panel);
+  expect(restored.lines[0].assignment.id).toBe(base.assignments[1].id);
+  await prepare(recast, base.assignments[0].id);
+  await recast.getByRole('button', { name: '確認した声の差し替えを反映', exact: true }).click();
+  await panel.getByRole('button', { name: '新しい台本を作る', exact: true }).click();
+  await panel.getByRole('button', { name: '台本の切り替えをキャンセル', exact: true }).click();
+  await expect(history).toBeVisible();
+  await panel.getByRole('button', { name: '新しい台本を作る', exact: true }).click();
+  await panel.getByRole('button', { name: '台本を保存せず切り替える', exact: true }).click();
+  await expect(history).toHaveCount(0);
 });

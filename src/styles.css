@@ -2365,3 +2365,19 @@ footer small {
 .script-recast [role='group'] button {
   margin: 0.3rem;
 }
+
+.script-recast-history {
+  margin: 1rem 0;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  min-width: 0;
+}
+.recast-audio-pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 1rem;
+}
+.recast-audio-side {
+  min-width: 0;
+}

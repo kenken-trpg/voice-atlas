@@ -28,8 +28,10 @@ import { ScriptAudioExport } from './ScriptAudioExport';
 import { ScriptLibrary, type ScriptLibraryHandle } from './ScriptLibrary';
 import { ScriptImport } from './ScriptImport';
 import { ScriptRecast } from './ScriptRecast';
+import { makeRecastSnapshot, undoScriptRecast } from '../../shared/script-recast-history';
+import { ScriptRecastHistory, type RecastMemory, type ScriptPreview } from './ScriptRecastHistory';
 
-type Preview = { key: string; url: string; blob: Blob; audition: LibraryAudition };
+type Preview = ScriptPreview;
 export function VoiceScript({
   assignments,
   disabled,
@@ -72,6 +74,10 @@ export function VoiceScript({
   const [generatingId, setGeneratingId] = useState<string | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [previews, setPreviews] = useState<Record<string, Preview>>({});
+  const [recastMemory, setRecastMemory] = useState<RecastMemory | null>(null);
+  const memoryRef = useRef<RecastMemory | null>(null);
+  const ownedUrls = useRef(new Set<string>());
+  const comparisonRef = useRef<HTMLElement>(null);
   const previewRef = useRef(previews);
   const controller = useRef<AbortController | null>(null);
   const running = useRef(false),
@@ -85,6 +91,7 @@ export function VoiceScript({
     queue.current = [];
     setPlayingId(null);
     audioRefs.current.forEach((audio) => audio.pause());
+    comparisonRef.current?.querySelectorAll('audio').forEach((audio) => audio.pause());
   }
   useEffect(() => {
     if (!active || !opened) {
@@ -96,19 +103,39 @@ export function VoiceScript({
     () => () => {
       controller.current?.abort();
       audioRefs.current.forEach((audio) => audio.pause());
-      Object.values(previewRef.current).forEach((p) => URL.revokeObjectURL(p.url));
+      ownedUrls.current.forEach((url) => URL.revokeObjectURL(url));
+      ownedUrls.current.clear();
     },
     [],
   );
+  function collectUrls() {
+    const retained = new Set(
+      [
+        ...Object.values(previewRef.current),
+        ...Object.values(memoryRef.current?.beforeAudio ?? {}),
+      ].map((preview) => preview.url),
+    );
+    for (const url of ownedUrls.current)
+      if (!retained.has(url)) {
+        URL.revokeObjectURL(url);
+        ownedUrls.current.delete(url);
+      }
+  }
+  function discardRecastMemory() {
+    stop();
+    memoryRef.current = null;
+    setRecastMemory(null);
+    collectUrls();
+  }
   function clear(ids = Object.keys(previewRef.current)) {
     stop();
     const next = { ...previewRef.current };
     for (const id of ids) {
-      if (next[id]) URL.revokeObjectURL(next[id].url);
       delete next[id];
     }
     previewRef.current = next;
     setPreviews(next);
+    collectUrls();
   }
   function editLine(id: string, update: Partial<ScriptLine>) {
     clear([id]);
@@ -196,19 +223,20 @@ export function VoiceScript({
         } catch {
           /* Optional provenance. */
         }
-        const old = previewRef.current[line.id];
-        if (old) URL.revokeObjectURL(old.url);
+        const url = URL.createObjectURL(blob);
+        ownedUrls.current.add(url);
         const next = {
           ...previewRef.current,
           [line.id]: {
             key: scriptAudioKey(line),
-            url: URL.createObjectURL(blob),
+            url,
             blob,
             audition: { generation, ...(model ? { modelInfo: structuredClone(model) } : {}) },
           },
         };
         previewRef.current = next;
         setPreviews(next);
+        collectUrls();
         completed++;
       }
       setNotice(
@@ -301,6 +329,7 @@ export function VoiceScript({
           disabled={baseLocked}
           onPendingChange={setSwitching}
           onOpen={(value) => {
+            discardRecastMemory();
             clear();
             setScript(value);
             setRecastIds([]);
@@ -328,6 +357,15 @@ export function VoiceScript({
           checking={checking}
           onApply={(plan) => {
             if (locked || running.current || importing.current) return;
+            const snapshot = makeRecastSnapshot(script, plan);
+            const beforeAudio: Record<string, Preview> = {};
+            for (const row of snapshot.rows) {
+              const preview = previewRef.current[row.before.id];
+              if (preview?.key === scriptAudioKey(row.before)) beforeAudio[row.before.id] = preview;
+            }
+            const memory = { snapshot, beforeAudio };
+            memoryRef.current = memory;
+            setRecastMemory(memory);
             clear(plan.audioChangedIds);
             setScript(plan.script);
             setRecastIds(plan.audioChangedIds);
@@ -336,6 +374,43 @@ export function VoiceScript({
               `${plan.changedIds.length}行の設定を差し替えました。音声が変わる${plan.audioChangedIds.length}行だけ再生成できます。ライブラリへの反映は保存してください。`,
             );
           }}
+        />
+        <ScriptRecastHistory
+          ref={comparisonRef}
+          script={script}
+          memory={recastMemory}
+          previews={previews}
+          disabled={locked}
+          onPlay={(event) => {
+            queue.current = [];
+            setPlayingId(null);
+            pauseOtherAudio(event);
+          }}
+          onDiscard={discardRecastMemory}
+          onUndo={() =>
+            act(() => {
+              if (locked || running.current || importing.current || !memoryRef.current) return;
+              const memory = memoryRef.current;
+              const restored = undoScriptRecast(script, memory.snapshot);
+              stop();
+              const next = { ...previewRef.current };
+              for (const row of memory.snapshot.rows) {
+                delete next[row.before.id];
+                const preview = memory.beforeAudio[row.before.id];
+                if (preview?.key === scriptAudioKey(row.before)) next[row.before.id] = preview;
+              }
+              previewRef.current = next;
+              setPreviews(next);
+              memoryRef.current = null;
+              setRecastMemory(null);
+              setScript(restored);
+              setRecastIds([]);
+              collectUrls();
+              setNotice(
+                '直前の差し替えを取り消しました。保持していた元の音声を戻し、対象外の編集は保持しています。ライブラリへの反映は保存してください。',
+              );
+            })
+          }
         />
         <label>
           台本名
