@@ -13,13 +13,31 @@
   --soft: #eff3ec;
 }
 .pronunciation-dictionary section,
-.pronunciation-dictionary fieldset {
+.pronunciation-dictionary fieldset,
+.script-scene-settings section,
+.script-scene-settings fieldset {
   display: grid;
   gap: 12px;
   min-width: 0;
 }
 .voice-script input[type='checkbox'] {
   width: auto;
+}
+.script-scene-settings ul {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.script-scene-settings li label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+}
+.script-scene-settings li input[type='checkbox'] {
+  flex: none;
+  margin-top: 0.35em;
 }
 .project-panel,
 .connection-guide {

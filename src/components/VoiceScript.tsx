@@ -37,6 +37,8 @@ import { ScriptLibrary, type ScriptLibraryHandle } from './ScriptLibrary';
 import { ScriptImport } from './ScriptImport';
 import { PronunciationDictionary } from './PronunciationDictionary';
 import { ScriptRecast } from './ScriptRecast';
+import { ScriptSceneSettings } from './ScriptSceneSettings';
+import { type ScriptRecastPlan } from '../../shared/script-recast';
 import { makeRecastSnapshot, undoScriptRecast } from '../../shared/script-recast-history';
 import { ScriptRecastHistory, type RecastMemory, type ScriptPreview } from './ScriptRecastHistory';
 
@@ -209,6 +211,25 @@ export function VoiceScript({
         '台本を保存・復元できませんでした。形式・件数・保存容量を確認してください。現在の台本は保持しています。',
       );
     }
+  }
+  function applyRecast(plan: ScriptRecastPlan) {
+    if (locked || running.current || importing.current) return;
+    const snapshot = makeRecastSnapshot(script, plan);
+    const beforeAudio: Record<string, Preview> = {};
+    for (const row of snapshot.rows) {
+      const preview = previewRef.current[row.before.id];
+      if (preview?.key === scriptAudioKey(row.before)) beforeAudio[row.before.id] = preview;
+    }
+    const memory = { snapshot, beforeAudio };
+    memoryRef.current = memory;
+    setRecastMemory(memory);
+    clear(plan.audioChangedIds);
+    setScript(plan.script);
+    setRecastIds(plan.audioChangedIds);
+    setError('');
+    setNotice(
+      `${plan.changedIds.length}行の設定を差し替えました。音声が変わる${plan.audioChangedIds.length}行だけ再生成できます。ライブラリへの反映は保存してください。`,
+    );
   }
   async function storedAudio(
     operation: (projectId: string, token: number) => Promise<void>,
@@ -577,31 +598,21 @@ export function VoiceScript({
             )
           }
         />
+        <ScriptSceneSettings
+          script={script}
+          assignments={assignments}
+          disabled={locked}
+          inventory={inventory}
+          checking={checking}
+          onApply={applyRecast}
+        />
         <ScriptRecast
           script={script}
           assignments={assignments}
           disabled={locked}
           inventory={inventory}
           checking={checking}
-          onApply={(plan) => {
-            if (locked || running.current || importing.current) return;
-            const snapshot = makeRecastSnapshot(script, plan);
-            const beforeAudio: Record<string, Preview> = {};
-            for (const row of snapshot.rows) {
-              const preview = previewRef.current[row.before.id];
-              if (preview?.key === scriptAudioKey(row.before)) beforeAudio[row.before.id] = preview;
-            }
-            const memory = { snapshot, beforeAudio };
-            memoryRef.current = memory;
-            setRecastMemory(memory);
-            clear(plan.audioChangedIds);
-            setScript(plan.script);
-            setRecastIds(plan.audioChangedIds);
-            setError('');
-            setNotice(
-              `${plan.changedIds.length}行の設定を差し替えました。音声が変わる${plan.audioChangedIds.length}行だけ再生成できます。ライブラリへの反映は保存してください。`,
-            );
-          }}
+          onApply={applyRecast}
         />
         <ScriptRecastHistory
           ref={comparisonRef}
