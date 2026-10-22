@@ -13,6 +13,10 @@ import {
   readWorkspaceProject,
   bindWorkspaceStorage,
   saveWorkspaceProject,
+  updateProjectLibrary,
+  projectLibraryStorageKey,
+  emptyProjectDocuments,
+  type ProjectLibraryAction,
   type VoiceProject,
   type ProjectDocuments,
   type ProjectPart,
@@ -26,6 +30,7 @@ type Context = {
   capture: () => ProjectDocuments;
   ensureIdle: () => void;
   commit: (project: VoiceProject, remount: boolean) => void;
+  transition: (action: ProjectLibraryAction, current?: VoiceProject) => void;
 };
 const ProjectContext = createContext<Context | null>(null);
 export function useProject() {
@@ -82,7 +87,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const capture = () => {
     ensureIdle();
     const documents =
-      readWorkspaceProject(localStorage)?.documents ?? legacyDocuments(localStorage);
+      readWorkspaceProject(localStorage)?.documents ??
+      (localStorage.getItem(projectLibraryStorageKey) === null
+        ? legacyDocuments(localStorage)
+        : emptyProjectDocuments());
     for (const [part, source] of sources.current)
       Object.assign(documents, { [part]: source.snapshot() });
     return documents;
@@ -97,8 +105,21 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setRevision((value) => value + 1);
     }
   };
+  const transition = (action: ProjectLibraryAction, current?: VoiceProject) => {
+    ensureIdle();
+    const previousId = readWorkspaceProject(localStorage)?.id;
+    const library = updateProjectLibrary(localStorage, action, current);
+    const next = library.projects.find((p) => p.id === library.activeId) ?? null;
+    setLoadError('');
+    if (action.type === 'open' || action.type === 'select' || previousId !== next?.id) {
+      setInitial(next);
+      setRevision((value) => value + 1);
+    }
+  };
   return (
-    <ProjectContext.Provider value={{ initial, loadError, register, capture, ensureIdle, commit }}>
+    <ProjectContext.Provider
+      value={{ initial, loadError, register, capture, ensureIdle, commit, transition }}
+    >
       <Fragment key={revision}>{children}</Fragment>
     </ProjectContext.Provider>
   );

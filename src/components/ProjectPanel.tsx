@@ -8,16 +8,24 @@ import {
   validateProject,
   serializeProject,
   legacyDocuments,
+  readProjectLibrary,
+  projectLibraryStorageKey,
+  type ProjectLibraryAction,
   type VoiceProject,
 } from '../../shared/project';
 import { useProject } from '../lib/project-context';
 import { download } from '../lib/http';
+import { ProjectLibrary } from './ProjectLibrary';
 
 export function ProjectPanel() {
-  const { initial, loadError, capture, ensureIdle, commit } = useProject();
+  const { initial, loadError, capture, ensureIdle, commit, transition } = useProject();
   const [name, setName] = useState(initial?.name ?? '新しい作品');
   const [saved, setSaved] = useState(initial);
   const [pending, setPending] = useState<VoiceProject | null>(null);
+  const [operation, setOperation] = useState<ProjectLibraryAction | null>(null);
+  const [choose, setChoose] = useState(false);
+  const [recoverSingle, setRecoverSingle] = useState(false);
+  const baseline = useRef<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -32,7 +40,9 @@ export function ProjectPanel() {
         setConflict(projectChangedElsewhere(localStorage));
         setSaved(stored);
         if (!stored) {
-          setDirty(false);
+          const snapshot = JSON.stringify(capture());
+          baseline.current ??= snapshot;
+          setDirty(name !== '新しい作品' || snapshot !== baseline.current);
           return;
         }
         setDirty(
@@ -93,6 +103,56 @@ export function ProjectPanel() {
       }
     });
   }
+  function currentSnapshot() {
+    const now = new Date().toISOString();
+    return validateProject({
+      format: 'voice-atlas-project',
+      version: 1,
+      id: saved?.id ?? crypto.randomUUID(),
+      name,
+      createdAt: saved?.createdAt ?? now,
+      updatedAt: now,
+      documents: capture(),
+    });
+  }
+  function request(action: ProjectLibraryAction, project: VoiceProject) {
+    act(() => {
+      ensureIdle();
+      setOperation(action);
+      setPending(project);
+      setChoose(false);
+      setRecoverSingle(false);
+    });
+  }
+  function execute(saveCurrent = false) {
+    if (!pending) return;
+    act(() => {
+      if (recoverSingle) commit(pending, true);
+      else
+        transition(
+          operation ?? { type: 'open', project: pending },
+          saveCurrent ? currentSnapshot() : undefined,
+        );
+      setPending(null);
+      setChoose(false);
+    });
+  }
+  function confirm() {
+    act(() => {
+      ensureIdle();
+      if (recoverSingle) {
+        execute();
+        return;
+      }
+      const stored = readWorkspaceProject(localStorage);
+      const changed = stored
+        ? stored.name !== name.trim() ||
+          JSON.stringify(stored.documents) !== JSON.stringify(capture())
+        : dirty;
+      if (changed && (operation?.type !== 'delete' || operation.id === stored?.id)) setChoose(true);
+      else execute();
+    });
+  }
   async function inspect(file?: File) {
     if (!file || loading) return;
     setLoading(true);
@@ -102,6 +162,19 @@ export function ProjectPanel() {
       if (file.size > maxProjectBytes) throw new Error('作品JSONは32MiB以下にしてください。');
       const project = parseProject(await file.text());
       ensureIdle();
+      let existing: VoiceProject | undefined;
+      setRecoverSingle(false);
+      try {
+        existing = readProjectLibrary(localStorage).projects.find((p) => p.id === project.id);
+      } catch {
+        if (localStorage.getItem(projectLibraryStorageKey) !== null)
+          throw new Error('作品一覧を復旧してください。');
+        setRecoverSingle(true);
+      }
+      if (existing && JSON.stringify(existing) !== JSON.stringify(project))
+        project.id = crypto.randomUUID();
+      setOperation({ type: 'open', project });
+      setChoose(false);
       setPending(project);
     } catch {
       setError(
@@ -117,6 +190,16 @@ export function ProjectPanel() {
       <summary>作品を保存・復元する</summary>
       <section aria-label="作品の保存と復元">
         <h2>声・配役・台本をまとめて保存</h2>
+        <ProjectLibrary
+          disabled={loading || !!pending}
+          onRequest={request}
+          onRename={(id, value) =>
+            act(() => {
+              transition({ type: 'rename', id, name: value });
+              if (saved?.id === id) setName(value);
+            })
+          }
+        />
         <p>
           現在の声探し、製品比較、採用声、設定比較、キャスティング表、編集中の台本、台本ライブラリを一つの作品にまとめます。
         </p>
@@ -196,6 +279,8 @@ export function ProjectPanel() {
                     documents: legacyDocuments(localStorage),
                   }),
                 );
+                setOperation(null);
+                setChoose(false);
               })
             }
           >
@@ -213,7 +298,8 @@ export function ProjectPanel() {
         {pending && (
           <div role="group" aria-label="作品の復元確認" className="project-confirmation">
             <p>
-              「{pending.name}」を復元します。{projectSummary(pending)}
+              「{pending.name}」を{operation?.type === 'delete' ? '削除' : '開き'}ます。
+              {projectSummary(pending)}
             </p>
             <p>
               現在の作品と編集中の内容を切り替えます。残す場合は、先にキャンセルして作品JSONを書き出してください。
@@ -222,14 +308,43 @@ export function ProjectPanel() {
               className="secondary-button"
               onClick={() =>
                 act(() => {
-                  ensureIdle();
-                  commit(pending, true);
+                  confirm();
                 })
               }
             >
-              確認した作品を復元
+              {operation?.type === 'delete' ? '確認した作品を削除' : '確認した作品を復元'}
             </button>
-            <button className="secondary-button" onClick={() => setPending(null)}>
+            {choose && (
+              <div role="group" aria-label="作品の未保存変更の確認">
+                <p>現在の作品に未保存の変更があります。</p>
+                {operation?.type !== 'delete' && (
+                  <button className="secondary-button" onClick={() => execute(true)}>
+                    保存して作品を切り替える
+                  </button>
+                )}
+                <button className="secondary-button" onClick={() => execute(false)}>
+                  {operation?.type === 'delete'
+                    ? '未保存の変更を破棄して削除'
+                    : '未保存の変更を破棄して切り替える'}
+                </button>
+                <button
+                  className="secondary-button"
+                  onClick={() => {
+                    setPending(null);
+                    setChoose(false);
+                  }}
+                >
+                  作品の切り替えをキャンセル
+                </button>
+              </div>
+            )}
+            <button
+              className="secondary-button"
+              onClick={() => {
+                setPending(null);
+                setChoose(false);
+              }}
+            >
               作品の復元をキャンセル
             </button>
           </div>

@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { pcmWav } from '../tests/fixtures/wav';
 import { projectFixture } from '../tests/fixtures/project';
 import { castingKey, type CastingInventory } from '../shared/casting';
-import { projectStorageKey } from '../shared/project';
+import { projectStorageKey, projectLibraryStorageKey } from '../shared/project';
 
 const voice = {
   engine: 'AivisSpeech' as const,
@@ -124,6 +124,9 @@ test('blocks project switching while generating and can cancel then retry the pr
   await expect(panel.getByLabel('はじめての試聴音声')).toBeVisible();
   await project.getByRole('button', { name: '確認した作品を復元' }).click();
   expect(
-    JSON.parse((await page.evaluate((key) => localStorage.getItem(key), projectStorageKey))!).name,
+    await page.evaluate((key) => {
+      const library = JSON.parse(localStorage.getItem(key)!);
+      return library.projects.find((p: { id: string }) => p.id === library.activeId).name;
+    }, projectLibraryStorageKey),
   ).toBe('導入シナリオ');
 });

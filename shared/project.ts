@@ -18,6 +18,9 @@ import {
 } from './script-library';
 
 export const projectStorageKey = 'voice-atlas-project-v1';
+export const projectLibraryStorageKey = 'voice-atlas-project-library-v1';
+export const maxProjectCount = 20;
+export const maxProjectLibraryBytes = 64 * 1024 * 1024;
 export const maxProjectBytes = 32 * 1024 * 1024;
 const jsonBytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).length;
 const recipeSchema = z.unknown().transform((value, ctx) => {
@@ -107,16 +110,27 @@ export type ProjectPart = keyof ProjectDocuments;
 export type ProjectStorage = Pick<Storage, 'getItem' | 'setItem'>;
 let boundStorage: ProjectStorage | undefined;
 let expectedProjectText: string | null = null;
+let expectedLibraryText: string | null = null;
 
 export function bindWorkspaceStorage(storage: ProjectStorage) {
   boundStorage = storage;
   expectedProjectText = storage.getItem(projectStorageKey);
+  expectedLibraryText = storage.getItem(projectLibraryStorageKey);
 }
 export function projectChangedElsewhere(storage: ProjectStorage) {
-  return storage === boundStorage && storage.getItem(projectStorageKey) !== expectedProjectText;
+  if (storage !== boundStorage) return false;
+  const library = storage.getItem(projectLibraryStorageKey);
+  return (
+    library !== expectedLibraryText ||
+    (library === null && storage.getItem(projectStorageKey) !== expectedProjectText)
+  );
 }
 export function readWorkspaceProject(storage: ProjectStorage) {
   if (storage !== boundStorage) return readProject(storage);
+  if (expectedLibraryText !== null) {
+    const library = parseProjectLibrary(expectedLibraryText);
+    return library.projects.find((p) => p.id === library.activeId) ?? null;
+  }
   return expectedProjectText === null ? null : parseProject(expectedProjectText);
 }
 export function saveWorkspaceProject(
@@ -129,6 +143,10 @@ export function saveWorkspaceProject(
       '別のタブで作品が変更されています。現在の編集を作品JSONに書き出してから、作品を開き直してください。',
     );
   const text = serializeProject(project);
+  if (storage.getItem(projectLibraryStorageKey) !== null) {
+    updateProjectLibrary(storage, { type: 'open', project }, undefined, replace);
+    return;
+  }
   storage.setItem(projectStorageKey, text);
   if (storage === boundStorage) expectedProjectText = text;
 }
@@ -145,8 +163,110 @@ export function serializeProject(project: VoiceProject) {
   return text;
 }
 export function readProject(storage: ProjectStorage) {
+  const library = storage.getItem(projectLibraryStorageKey);
+  if (library !== null) {
+    const parsed = parseProjectLibrary(library);
+    return parsed.projects.find((p) => p.id === parsed.activeId) ?? null;
+  }
   const raw = storage.getItem(projectStorageKey);
   return raw === null ? null : parseProject(raw);
+}
+export function emptyProjectDocuments(): ProjectDocuments {
+  return legacyDocuments({ getItem: () => null, setItem: () => {} });
+}
+export function makeEmptyProject(name = '新しい作品'): VoiceProject {
+  const now = new Date().toISOString();
+  return validateProject({
+    format: 'voice-atlas-project',
+    version: 1,
+    id: crypto.randomUUID(),
+    name,
+    createdAt: now,
+    updatedAt: now,
+    documents: emptyProjectDocuments(),
+  });
+}
+const librarySchema = z.object({
+  format: z.literal('voice-atlas-project-library'),
+  version: z.literal(1),
+  activeId: z.uuid().nullable(),
+  projects: z.array(z.unknown()).max(maxProjectCount),
+});
+export function parseProjectLibrary(text: string) {
+  if (new TextEncoder().encode(text).length > maxProjectLibraryBytes)
+    throw new Error('作品ライブラリは64MiB以下にしてください。');
+  const raw = librarySchema.parse(JSON.parse(text));
+  const projects = raw.projects.map(validateProject);
+  if (
+    new Set(projects.map((p) => p.id)).size !== projects.length ||
+    (raw.activeId !== null && !projects.some((p) => p.id === raw.activeId))
+  )
+    throw new Error('作品IDまたは選択中の作品が不正です。');
+  return { ...raw, projects };
+}
+export type ProjectLibrary = ReturnType<typeof parseProjectLibrary>;
+export function readProjectLibrary(storage: ProjectStorage, snapshot = true): ProjectLibrary {
+  const text =
+    snapshot && storage === boundStorage
+      ? expectedLibraryText
+      : storage.getItem(projectLibraryStorageKey);
+  if (text !== null) return parseProjectLibrary(text);
+  const project = snapshot ? readWorkspaceProject(storage) : readProject(storage);
+  return {
+    format: 'voice-atlas-project-library',
+    version: 1,
+    activeId: project?.id ?? null,
+    projects: project ? [project] : [],
+  };
+}
+export type ProjectLibraryAction =
+  | { type: 'open'; project: VoiceProject }
+  | { type: 'select'; id: string }
+  | { type: 'rename'; id: string; name: string }
+  | { type: 'delete'; id: string };
+export function updateProjectLibrary(
+  storage: ProjectStorage,
+  action: ProjectLibraryAction,
+  current?: VoiceProject,
+  replace = false,
+) {
+  if (!replace && projectChangedElsewhere(storage))
+    throw new Error(
+      '別のタブで作品が変更されています。現在の編集を作品JSONに書き出してから、作品を開き直してください。',
+    );
+  const library = readProjectLibrary(storage, !replace);
+  let projects = [...library.projects],
+    activeId = library.activeId;
+  const put = (project: VoiceProject) => {
+    const saved = validateProject(project);
+    projects = projects.some((p) => p.id === saved.id)
+      ? projects.map((p) => (p.id === saved.id ? saved : p))
+      : [...projects, saved];
+  };
+  if (current) put(current);
+  if (action.type === 'open') {
+    put(action.project);
+    activeId = action.project.id;
+  } else {
+    const target = projects.find((p) => p.id === action.id);
+    if (!target) throw new Error('対象の作品が見つかりません。');
+    if (action.type === 'select') activeId = target.id;
+    if (action.type === 'rename')
+      put({ ...target, name: action.name, updatedAt: new Date().toISOString() });
+    if (action.type === 'delete') {
+      projects = projects.filter((p) => p.id !== target.id);
+      if (activeId === target.id) activeId = projects[0]?.id ?? null;
+    }
+  }
+  const next = parseProjectLibrary(
+    JSON.stringify({ format: 'voice-atlas-project-library', version: 1, activeId, projects }),
+  );
+  const text = JSON.stringify(next);
+  if (new TextEncoder().encode(text).length > maxProjectLibraryBytes)
+    throw new Error('作品ライブラリは64MiB以下にしてください。');
+  storage.setItem(projectLibraryStorageKey, text);
+  if (storage === boundStorage) expectedLibraryText = text;
+  return next;
 }
 export function legacyDocuments(storage: ProjectStorage): ProjectDocuments {
   const library = storage.getItem(libraryStorageKey);
@@ -178,7 +298,10 @@ export function readWorkspaceDocument(key: string, storage: ProjectStorage = loc
   const part = Object.entries(documentKeys).find(([, item]) => item === key)?.[0] as
     keyof typeof documentKeys | undefined;
   if (!part) throw new Error('未対応の保存先です。');
-  if (!project) return storage.getItem(key);
+  if (!project)
+    return storage.getItem(projectLibraryStorageKey) === null
+      ? storage.getItem(key)
+      : JSON.stringify(emptyProjectDocuments()[part]);
   const value = project.documents[part];
   return value === null ? null : JSON.stringify(value);
 }
@@ -196,6 +319,14 @@ export function writeWorkspaceDocument(
   if (!part) throw new Error('未対応の保存先です。');
   const project = readWorkspaceProject(storage);
   if (!project) {
+    if (storage.getItem(projectLibraryStorageKey) !== null) {
+      const fresh = makeEmptyProject();
+      saveWorkspaceProject(
+        { ...fresh, documents: { ...fresh.documents, [part]: JSON.parse(text) } },
+        storage,
+      );
+      return;
+    }
     storage.setItem(key, text);
     return;
   }

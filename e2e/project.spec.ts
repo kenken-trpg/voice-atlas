@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { projectFixture } from '../tests/fixtures/project';
-import { projectStorageKey } from '../shared/project';
+import { projectStorageKey, projectLibraryStorageKey } from '../shared/project';
 import { scriptStorageKey, serializeScript } from '../shared/script';
 import { scriptLibraryStorageKey } from '../shared/script-library';
 import { scriptFixture } from '../tests/fixtures/script';
@@ -31,6 +31,20 @@ async function readDownload(page: Page, action: () => Promise<unknown>) {
   const chunks: Buffer[] = [];
   for await (const chunk of stream) chunks.push(Buffer.from(chunk));
   return JSON.parse(Buffer.concat(chunks).toString());
+}
+async function storedProject(page: Page) {
+  return page.evaluate(
+    ({ single, library }) => {
+      const text = localStorage.getItem(library);
+      if (text !== null) {
+        const value = JSON.parse(text);
+        return value.projects.find((p: { id: string }) => p.id === value.activeId) ?? null;
+      }
+      const raw = localStorage.getItem(single);
+      return raw === null ? null : JSON.parse(raw);
+    },
+    { single: projectStorageKey, library: projectLibraryStorageKey },
+  );
 }
 async function inspect(page: Page, value: unknown) {
   await page.getByLabel('作品JSONファイル', { exact: true }).setInputFiles({
@@ -114,9 +128,7 @@ test('reviews and cancels switching, restores casting and scripts, and keeps leg
   await page.getByText('作品を保存・復元する', { exact: true }).click();
   const projectPanel = page.getByRole('region', { name: '作品の保存と復元', exact: true });
   await projectPanel.getByRole('button', { name: '作品をブラウザに保存', exact: true }).click();
-  const saved = JSON.parse(
-    (await page.evaluate((key) => localStorage.getItem(key), projectStorageKey))!,
-  );
+  const saved = await storedProject(page);
   expect(saved.documents.script.lines[0].text).toBe('まだ個別保存していないセリフ');
   expect(saved.documents.casting.session.candidates[0].recipe.tempoDynamicsScale).toBe(0.43);
   expect(
@@ -130,9 +142,7 @@ test('reviews and cancels switching, restores casting and scripts, and keeps leg
   expect(await page.evaluate((key) => localStorage.getItem(key), scriptStorageKey)).toBe(original);
   await projectPanel.getByRole('button', { name: '以前のブラウザ保存を開く', exact: true }).click();
   await projectPanel.getByRole('button', { name: '確認した作品を復元', exact: true }).click();
-  const previous = JSON.parse(
-    (await page.evaluate((key) => localStorage.getItem(key), projectStorageKey))!,
-  );
+  const previous = await storedProject(page);
   expect(previous.name).toBe('以前のブラウザ保存');
   expect(previous.documents.script.lines[0].text).toBe('ようこそ。');
 });
@@ -147,19 +157,25 @@ test('rejects invalid files and quota failures without replacing the current pro
   await inspect(page, bad);
   await expect(panel.getByRole('alert')).toContainText('作品JSONを確認できませんでした');
   expect(await page.evaluate((key) => localStorage.getItem(key), projectStorageKey)).toBe(before);
-  await page.evaluate((key) => {
-    const set = Storage.prototype.setItem;
-    Storage.prototype.setItem = function (name, value) {
-      if (name === key) throw new DOMException('full', 'QuotaExceededError');
-      set.call(this, name, value);
-    };
-  }, projectStorageKey);
+  await page.evaluate(
+    (keys) => {
+      const set = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (name, value) {
+        if (keys.includes(name)) throw new DOMException('full', 'QuotaExceededError');
+        set.call(this, name, value);
+      };
+    },
+    [projectStorageKey, projectLibraryStorageKey],
+  );
   await panel.getByLabel('保存する作品名').fill('保存できない変更');
   await panel.getByRole('button', { name: '作品をブラウザに保存', exact: true }).click();
   await expect(panel.getByRole('alert')).toContainText('保存容量');
   expect(await page.evaluate((key) => localStorage.getItem(key), projectStorageKey)).toBe(before);
   await inspect(page, projectFixture());
   await panel.getByRole('button', { name: '確認した作品を復元', exact: true }).click();
+  await panel
+    .getByRole('button', { name: '未保存の変更を破棄して切り替える', exact: true })
+    .click();
   await expect(panel.getByRole('alert')).toContainText('現在の作業は保持');
   await panel.getByRole('button', { name: '作品の復元をキャンセル', exact: true }).click();
   await expect(panel.getByLabel('保存する作品名')).toHaveValue('保存できない変更');
@@ -174,7 +190,9 @@ test('preserves corrupt saved data and permits recovery only by a reviewed valid
 }) => {
   await page.addInitScript((key) => localStorage.setItem(key, '{broken'), projectStorageKey);
   const panel = await open(page);
-  await expect(panel.getByRole('alert')).toContainText('保存データは上書きしていません');
+  await expect(
+    panel.getByRole('alert').filter({ hasText: '保存データは上書きしていません' }),
+  ).toBeVisible();
   await panel.getByRole('button', { name: '作品をブラウザに保存', exact: true }).click();
   expect(await page.evaluate((key) => localStorage.getItem(key), projectStorageKey)).toBe(
     '{broken',
