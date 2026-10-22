@@ -26,6 +26,7 @@ import { pauseOtherAudio } from './ComparisonPanel';
 import { AivisModelDetails } from './AivisModelDetails';
 import { ScriptAudioExport } from './ScriptAudioExport';
 import { ScriptLibrary, type ScriptLibraryHandle } from './ScriptLibrary';
+import { ScriptImport } from './ScriptImport';
 
 type Preview = { key: string; url: string; blob: Blob; audition: LibraryAudition };
 export function VoiceScript({
@@ -301,6 +302,18 @@ export function VoiceScript({
             setNotice('');
           }}
         />
+        <ScriptImport
+          assignments={assignments}
+          disabled={locked}
+          gapMs={script.gapMs}
+          inventory={inventory}
+          checking={checking}
+          onImport={(value) =>
+            libraryRef.current?.replace(value, () =>
+              localStorage.setItem(scriptStorageKey, serializeScript(value)),
+            )
+          }
+        />
         <label>
           台本名
           <input
@@ -433,6 +446,7 @@ export function VoiceScript({
                   第{index + 1}行{generatingId === line.id ? ' · 生成中' : ''}
                   {playingId === line.id ? ' · 連続試聴中' : ''}
                 </strong>
+                {line.character && <p>発話者：{line.character}</p>}
                 <label>
                   キャラクターと場面
                   <select

@@ -2339,3 +2339,13 @@ footer small {
 .script-library [role='group'] button {
   margin: 0.3rem;
 }
+
+.script-import {
+  margin: 1rem 0;
+  padding: 1rem 0;
+  border-block: 1px solid var(--line);
+  min-width: 0;
+}
+.script-import .import-issue {
+  font-weight: 700;
+}

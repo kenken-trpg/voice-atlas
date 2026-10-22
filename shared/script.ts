@@ -6,6 +6,7 @@ export const scriptStorageKey = 'voice-atlas-script-v1';
 export const maxScriptBytes = 8 * 1024 * 1024;
 export const scriptLineSchema = z.object({
   id: z.uuid(),
+  character: z.string().trim().min(1).max(100).optional(),
   assignment: castingAssignmentSchema.nullable(),
   text: z.string().max(300),
 });
