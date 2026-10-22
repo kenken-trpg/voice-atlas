@@ -1,3 +1,5 @@
+import { readWorkspaceDocument, writeWorkspaceDocument } from '../../shared/project';
+import { useProjectPart } from '../lib/project-context';
 import { useImperativeHandle, useRef, useState, type Ref } from 'react';
 import { emptyScript, scriptSchema, type VoiceScript } from '../../shared/script';
 import {
@@ -35,7 +37,7 @@ export function ScriptLibrary({
 }) {
   const [initial] = useState(() => {
     try {
-      const raw = localStorage.getItem(scriptLibraryStorageKey);
+      const raw = readWorkspaceDocument(scriptLibraryStorageKey);
       return { entries: raw ? parseScriptLibrary(raw) : [], error: '' };
     } catch {
       return {
@@ -60,6 +62,11 @@ export function ScriptLibrary({
   const [notice, setNotice] = useState('');
   const dirty = JSON.stringify([script, project, scene]) !== baseline;
   const locked = disabled || loading || !!pending;
+  useProjectPart(
+    'scriptLibrary',
+    () => ({ format: 'voice-atlas-script-library', version: 1, entries }),
+    locked,
+  );
   const canSave =
     !!script.title.trim() &&
     !!project.trim() &&
@@ -83,7 +90,7 @@ export function ScriptLibrary({
   }
   function persist(next: ScriptLibraryEntry[]) {
     const text = serializeScriptLibrary(next);
-    localStorage.setItem(scriptLibraryStorageKey, text);
+    writeWorkspaceDocument(scriptLibraryStorageKey, text);
     setEntries(parseScriptLibrary(text));
   }
   function currentEntry() {

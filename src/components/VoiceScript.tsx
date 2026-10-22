@@ -1,4 +1,6 @@
+import { readWorkspaceDocument, writeWorkspaceDocument } from '../../shared/project';
 import { useEffect, useRef, useState } from 'react';
+import { useProjectPart } from '../lib/project-context';
 import { type CastingAssignment } from '../../shared/casting-board';
 import {
   emptyScript,
@@ -51,7 +53,7 @@ export function VoiceScript({
 }) {
   const [initial] = useState(() => {
     try {
-      const raw = localStorage.getItem(scriptStorageKey);
+      const raw = readWorkspaceDocument(scriptStorageKey);
       return { script: raw ? parseScript(raw) : emptyScript(), error: '' };
     } catch {
       return {
@@ -87,6 +89,7 @@ export function VoiceScript({
   const fileRef = useRef<HTMLInputElement>(null);
   const baseLocked = disabled || busy || loading || exporting;
   const locked = baseLocked || switching;
+  useProjectPart('script', () => script, locked);
   function stop() {
     queue.current = [];
     setPlayingId(null);
@@ -290,7 +293,7 @@ export function VoiceScript({
       if (file.size > maxScriptBytes) throw new Error('size');
       const saved = parseScript(await file.text());
       libraryRef.current?.replace(saved, () =>
-        localStorage.setItem(scriptStorageKey, serializeScript(saved)),
+        writeWorkspaceDocument(scriptStorageKey, serializeScript(saved)),
       );
     } catch {
       setError(
@@ -345,7 +348,7 @@ export function VoiceScript({
           checking={checking}
           onImport={(value) =>
             libraryRef.current?.replace(value, () =>
-              localStorage.setItem(scriptStorageKey, serializeScript(value)),
+              writeWorkspaceDocument(scriptStorageKey, serializeScript(value)),
             )
           }
         />
@@ -441,7 +444,7 @@ export function VoiceScript({
             disabled={locked}
             onClick={() =>
               act(() => {
-                localStorage.setItem(scriptStorageKey, serializeScript(script));
+                writeWorkspaceDocument(scriptStorageKey, serializeScript(script));
                 setNotice(
                   '台本をブラウザ内に保存しました。音声は再読み込み後に再生成してください。',
                 );

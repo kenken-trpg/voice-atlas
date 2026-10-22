@@ -52,6 +52,9 @@ import { RecipeControls } from './components/RecipeControls';
 import { AvailabilityBadge, AvailabilityHelp } from './components/AvailabilityBadge';
 import { CharacterContext } from './components/CharacterContext';
 import { jsonRequest, download } from './lib/http';
+import { ProjectProvider, useProject, useProjectPart } from './lib/project-context';
+import { ProjectPanel } from './components/ProjectPanel';
+import { ConnectionGuide } from './components/ConnectionGuide';
 import './styles.css';
 
 type Mode = 'manual' | Provider;
@@ -87,33 +90,68 @@ const axisHelp: Record<(typeof axes)[number], string> = {
   airiness: '張りのある声から息を含んだ声までを指定します。ささやきスタイルの候補にも影響します。',
 };
 function App() {
+  const { initial } = useProject();
+  const restoredWorkbench = initial?.documents.workbench;
+  const restoredRecipe = restoredWorkbench?.recipe;
+  const recipeTimestamp = useRef(restoredRecipe?.createdAt ?? new Date().toISOString());
   const [image, setImage] = useState<ImageData | null>(null);
   const [mode, setMode] = useState<Mode>('manual');
   const [consent, setConsent] = useState(false);
-  const [direction, setDirection] = useState('');
-  const [inputMode, setInputMode] = useState<CharacterInput['mode']>('image');
-  const [characterText, setCharacterText] = useState('');
-  const [profileInput, setProfileInput] = useState<CharacterInput | null>(null);
-  const [profile, setProfile] = useState<Profile>({ ...neutralProfile });
-  const [preferences, setPreferences] = useState<Preferences>({ engine: 'all', budget: 'all' });
+  const [direction, setDirection] = useState(restoredWorkbench?.input.direction ?? '');
+  const [inputMode, setInputMode] = useState<CharacterInput['mode']>(
+    restoredWorkbench?.input.mode ?? 'image',
+  );
+  const [characterText, setCharacterText] = useState(restoredWorkbench?.input.text ?? '');
+  const [profileInput, setProfileInput] = useState<CharacterInput | null>(
+    restoredRecipe?.version === 3 ? (restoredRecipe.profileInput ?? null) : null,
+  );
+  const [profile, setProfile] = useState<Profile>(
+    restoredWorkbench?.profile ?? { ...neutralProfile },
+  );
+  const [preferences, setPreferences] = useState<Preferences>(
+    restoredRecipe &&
+      restoredRecipe.version !== 1 &&
+      recommend(restoredRecipe.profile, restoredRecipe.preferences).some(
+        (item) => item.voice.id === restoredRecipe.voice.id,
+      )
+      ? restoredRecipe.preferences
+      : { engine: 'all', budget: 'all' },
+  );
   const [availableOnly, setAvailableOnly] = useState(false);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
-  const [source, setSource] = useState<Mode>('manual');
-  const [edited, setEdited] = useState(false);
-  const [hasResults, setHasResults] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [recipes, setRecipes] = useState<Record<string, Recipe>>({});
-  const [comparisonIds, setComparisonIds] = useState<[string, string] | null>(null);
-  const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
+  const [source, setSource] = useState<Mode>(restoredRecipe?.source ?? 'manual');
+  const [edited, setEdited] = useState(restoredRecipe?.manuallyAdjusted ?? false);
+  const [hasResults, setHasResults] = useState(!!restoredRecipe);
+  const [selectedId, setSelectedId] = useState<string | null>(restoredRecipe?.voice.id ?? null);
+  const [recipes, setRecipes] = useState<Record<string, Recipe>>(() => {
+    if (!restoredRecipe) return {};
+    return {
+      ...(restoredRecipe.version !== 1
+        ? Object.fromEntries(
+            restoredRecipe.candidates.map((item) => [item.voiceId, item.parameters]),
+          )
+        : {}),
+      ...(restoredRecipe.parameters
+        ? { [restoredRecipe.voice.id]: restoredRecipe.parameters }
+        : {}),
+    };
+  });
+  const [comparisonIds, setComparisonIds] = useState<[string, string] | null>(
+    restoredRecipe && restoredRecipe.version !== 1 ? restoredRecipe.comparisonIds : null,
+  );
+  const [evaluations, setEvaluations] = useState<Evaluation[]>(
+    restoredRecipe && restoredRecipe.version !== 1 ? restoredRecipe.evaluations : [],
+  );
   const [evaluationOpen, setEvaluationOpen] = useState(false);
   const [castingOpen, setCastingOpen] = useState(false);
   const [notice, setNotice] = useState('');
   const [loadingRecipe, setLoadingRecipe] = useState(false);
-  const [text, setText] = useState(defaultText);
+  const [text, setText] = useState(restoredRecipe?.sampleText ?? defaultText);
   const [caps, setCaps] = useState<Capabilities | null>(null);
   const [checking, setChecking] = useState(false);
   const connectionGeneration = useRef(0);
   const [busy, setBusy] = useState<'analysis' | 'audio' | null>(null);
+  const [guideBusy, setGuideBusy] = useState(false);
   const [loadingImage, setLoadingImage] = useState(false);
   const [error, setError] = useState('');
   const [audioCache, setAudioCache] = useState<
@@ -386,39 +424,36 @@ function App() {
       }
     }
   }
+  function recipeSnapshot(createdAt = new Date().toISOString()) {
+    if (!selected) return null;
+    return {
+      format: 'voice-atlas-recipe',
+      version: 3,
+      createdAt,
+      source,
+      manuallyAdjusted: edited,
+      note: 'Voice Atlasによる創作上の演出案。VOICEVOX等のプロジェクトファイルではありません。',
+      voice: selected.voice,
+      profile,
+      parameters: recipe,
+      guide: selected.guide,
+      sampleText: text,
+      catalogReviewedAt,
+      credit: selected.voice.credit,
+      preferences,
+      candidates: voicevoxVoices.map((voice) => ({
+        voiceId: voice.id,
+        parameters: getRecipe(voice.id),
+      })),
+      comparisonIds,
+      evaluations,
+      characterInput: currentInput(),
+      profileInput,
+    };
+  }
   function exportRecipe() {
     if (!selected) return;
-    download(
-      `voice-atlas-${selected.voice.id}.json`,
-      JSON.stringify(
-        {
-          format: 'voice-atlas-recipe',
-          version: 3,
-          createdAt: new Date().toISOString(),
-          source,
-          manuallyAdjusted: edited,
-          note: 'Voice Atlasによる創作上の演出案。VOICEVOX等のプロジェクトファイルではありません。',
-          voice: selected.voice,
-          profile,
-          parameters: recipe,
-          guide: selected.guide,
-          sampleText: text,
-          catalogReviewedAt,
-          credit: selected.voice.credit,
-          preferences,
-          candidates: voicevoxVoices.map((voice) => ({
-            voiceId: voice.id,
-            parameters: getRecipe(voice.id),
-          })),
-          comparisonIds,
-          evaluations,
-          characterInput: currentInput(),
-          profileInput,
-        },
-        null,
-        2,
-      ),
-    );
+    download(`voice-atlas-${selected.voice.id}.json`, JSON.stringify(recipeSnapshot(), null, 2));
   }
   function startComparison() {
     const rankedIds = allRecommendations
@@ -479,6 +514,7 @@ function App() {
         throw new Error('有効なJSONファイルを指定してください。');
       }
       const saved = parseSavedRecipe(input);
+      recipeTimestamp.current = saved.createdAt;
       const restored: Record<string, Recipe> = {};
       if (saved.version !== 1)
         saved.candidates.forEach((item) => {
@@ -531,7 +567,16 @@ function App() {
       if (recipeFileRef.current) recipeFileRef.current.value = '';
     }
   }
-  const disabled = Boolean(busy) || loadingImage || loadingRecipe;
+  const disabled = Boolean(busy) || guideBusy || loadingImage || loadingRecipe;
+  useProjectPart(
+    'workbench',
+    () => ({
+      input: currentInput(),
+      profile,
+      recipe: hasResults ? parseSavedRecipe(recipeSnapshot(recipeTimestamp.current)) : null,
+    }),
+    disabled,
+  );
   const providerReady =
     mode === 'manual' ||
     (mode === 'ollama' && inputMode === 'text'
@@ -593,6 +638,11 @@ function App() {
             </div>
           </div>
         </section>
+        <ConnectionGuide
+          disabled={Boolean(busy) || loadingImage || loadingRecipe}
+          onBusyChange={setGuideBusy}
+        />
+        <ProjectPanel />
         <div className="recipe-import">
           <button
             className="secondary-button"
@@ -1565,4 +1615,8 @@ function App() {
     </>
   );
 }
-createRoot(document.getElementById('root')!).render(<App />);
+createRoot(document.getElementById('root')!).render(
+  <ProjectProvider>
+    <App />
+  </ProjectProvider>,
+);

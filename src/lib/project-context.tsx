@@ -1,0 +1,105 @@
+import {
+  createContext,
+  Fragment,
+  useContext,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import {
+  legacyDocuments,
+  readProject,
+  readWorkspaceProject,
+  bindWorkspaceStorage,
+  saveWorkspaceProject,
+  type VoiceProject,
+  type ProjectDocuments,
+  type ProjectPart,
+} from '../../shared/project';
+
+type Source = { snapshot: () => unknown; busy: () => boolean };
+type Context = {
+  initial: VoiceProject | null;
+  loadError: string;
+  register: (part: ProjectPart, source: Source) => () => void;
+  capture: () => ProjectDocuments;
+  ensureIdle: () => void;
+  commit: (project: VoiceProject, remount: boolean) => void;
+};
+const ProjectContext = createContext<Context | null>(null);
+export function useProject() {
+  const context = useContext(ProjectContext);
+  if (!context) throw new Error('作品の保存コンテキストがありません。');
+  return context;
+}
+export function useProjectPart<K extends ProjectPart>(
+  part: K,
+  snapshot: () => ProjectDocuments[K],
+  busy: boolean,
+) {
+  const { register } = useProject();
+  const current = useRef({ snapshot, busy });
+  useLayoutEffect(() => {
+    current.current = { snapshot, busy };
+  });
+  useLayoutEffect(
+    () =>
+      register(part, {
+        snapshot: () => current.current.snapshot(),
+        busy: () => current.current.busy,
+      }),
+    [part, register],
+  );
+}
+export function ProjectProvider({ children }: { children: ReactNode }) {
+  const [loaded] = useState(() => {
+    try {
+      bindWorkspaceStorage(localStorage);
+      return { project: readProject(localStorage), error: '' };
+    } catch {
+      return {
+        project: null,
+        error:
+          '保存済みの作品を読み込めませんでした。保存データは上書きしていません。作品JSONから復元してください。',
+      };
+    }
+  });
+  const [initial, setInitial] = useState(loaded.project);
+  const [loadError, setLoadError] = useState(loaded.error);
+  const [revision, setRevision] = useState(0);
+  const sources = useRef(new Map<ProjectPart, Source>());
+  const register = useRef<Context['register']>((part, source) => {
+    sources.current.set(part, source);
+    return () => {
+      if (sources.current.get(part) === source) sources.current.delete(part);
+    };
+  }).current;
+  const ensureIdle = () => {
+    if ([...sources.current.values()].some((source) => source.busy()))
+      throw new Error('生成・読み込み・確認の処理が完了してから作品を操作してください。');
+  };
+  const capture = () => {
+    ensureIdle();
+    const documents =
+      readWorkspaceProject(localStorage)?.documents ?? legacyDocuments(localStorage);
+    for (const [part, source] of sources.current)
+      Object.assign(documents, { [part]: source.snapshot() });
+    return documents;
+  };
+  const commit = (project: VoiceProject, remount: boolean) => {
+    ensureIdle();
+    // Validate and serialize before the single atomic setItem. UI changes follow success.
+    saveWorkspaceProject(project, localStorage, remount);
+    setLoadError('');
+    if (remount) {
+      setInitial(project);
+      setRevision((value) => value + 1);
+    }
+  };
+  return (
+    <ProjectContext.Provider value={{ initial, loadError, register, capture, ensureIdle, commit }}>
+      <Fragment key={revision}>{children}</Fragment>
+    </ProjectContext.Provider>
+  );
+}
