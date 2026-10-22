@@ -27,6 +27,7 @@ import { AivisModelDetails } from './AivisModelDetails';
 import { ScriptAudioExport } from './ScriptAudioExport';
 import { ScriptLibrary, type ScriptLibraryHandle } from './ScriptLibrary';
 import { ScriptImport } from './ScriptImport';
+import { ScriptRecast } from './ScriptRecast';
 
 type Preview = { key: string; url: string; blob: Blob; audition: LibraryAudition };
 export function VoiceScript({
@@ -66,6 +67,7 @@ export function VoiceScript({
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [switching, setSwitching] = useState(false);
+  const [recastIds, setRecastIds] = useState<string[]>([]);
   const libraryRef = useRef<ScriptLibraryHandle>(null);
   const [generatingId, setGeneratingId] = useState<string | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
@@ -142,9 +144,11 @@ export function VoiceScript({
       );
     }
   }
-  async function generate(forceId?: string) {
+  async function generate(forceId?: string, onlyIds?: string[]) {
     if (locked || running.current || importing.current || !active || !opened || checking) return;
-    const targets = script.lines.filter((line) => (forceId ? line.id === forceId : !audio(line)));
+    const targets = script.lines.filter((line) =>
+      forceId ? line.id === forceId : (!onlyIds || onlyIds.includes(line.id)) && !audio(line),
+    );
     if (
       !targets.length ||
       targets.some((line) => !line.text.trim() || availability(line) !== '試聴可能')
@@ -272,6 +276,7 @@ export function VoiceScript({
   }
   const allReady = script.lines.length > 0 && script.lines.every((line) => audio(line));
   const missing = script.lines.filter((line) => !audio(line));
+  const recastMissing = missing.filter((line) => recastIds.includes(line.id));
   return (
     <details
       className="voice-script"
@@ -298,6 +303,7 @@ export function VoiceScript({
           onOpen={(value) => {
             clear();
             setScript(value);
+            setRecastIds([]);
             setError('');
             setNotice('');
           }}
@@ -313,6 +319,23 @@ export function VoiceScript({
               localStorage.setItem(scriptStorageKey, serializeScript(value)),
             )
           }
+        />
+        <ScriptRecast
+          script={script}
+          assignments={assignments}
+          disabled={locked}
+          inventory={inventory}
+          checking={checking}
+          onApply={(plan) => {
+            if (locked || running.current || importing.current) return;
+            clear(plan.audioChangedIds);
+            setScript(plan.script);
+            setRecastIds(plan.audioChangedIds);
+            setError('');
+            setNotice(
+              `${plan.changedIds.length}行の設定を差し替えました。音声が変わる${plan.audioChangedIds.length}行だけ再生成できます。ライブラリへの反映は保存してください。`,
+            );
+          }}
         />
         <label>
           台本名
@@ -393,6 +416,20 @@ export function VoiceScript({
             未生成の行を台本順に生成
           </button>
           {busy && <button onClick={() => controller.current?.abort()}>台本の生成を中止</button>}
+          {recastIds.length > 0 && (
+            <button
+              className="secondary-button"
+              disabled={
+                locked ||
+                checking ||
+                !recastMissing.length ||
+                recastMissing.some((line) => !line.text.trim() || availability(line) !== '試聴可能')
+              }
+              onClick={() => void generate(undefined, recastIds)}
+            >
+              差し替えた行の未生成音声を生成
+            </button>
+          )}
           <button
             className="secondary-button"
             disabled={locked || !allReady || playingId !== null}

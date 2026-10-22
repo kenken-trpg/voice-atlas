@@ -2349,3 +2349,19 @@ footer small {
 .script-import .import-issue {
   font-weight: 700;
 }
+
+.script-recast {
+  margin: 1rem 0;
+  padding: 1rem 0;
+  border-block: 1px solid var(--line);
+  min-width: 0;
+}
+.script-recast [role='group'] {
+  margin: 1rem 0;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.script-recast [role='group'] button {
+  margin: 0.3rem;
+}
