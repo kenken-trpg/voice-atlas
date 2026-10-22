@@ -1,11 +1,45 @@
 import { test, expect, type Page } from '@playwright/test';
 import { projectFixture } from '../tests/fixtures/project';
 import { projectStorageKey, projectLibraryStorageKey } from '../shared/project';
+import { scriptStorageKey, serializeScript } from '../shared/script';
 async function open(page: Page) {
   await page.goto('/');
   await page.getByText('作品を保存・復元する', { exact: true }).click();
   return page.getByRole('region', { name: '作品の保存と復元', exact: true });
 }
+test('deletes the last project without reviving legacy scripts or showing corrupt-data errors', async ({
+  page,
+}) => {
+  const project = projectFixture();
+  await page.addInitScript(
+    ({ single, scriptKey, data, script }) => {
+      if (!localStorage.getItem(single)) localStorage.setItem(single, data);
+      localStorage.setItem(scriptKey, script);
+    },
+    {
+      single: projectStorageKey,
+      scriptKey: scriptStorageKey,
+      data: JSON.stringify(project),
+      script: serializeScript(project.documents.script!),
+    },
+  );
+  const panel = await open(page);
+  await panel.getByRole('button', { name: 'この作品を削除', exact: true }).click();
+  await panel.getByRole('button', { name: '確認した作品を削除', exact: true }).click();
+  if (
+    await panel.getByRole('button', { name: '未保存の変更を破棄して削除', exact: true }).isVisible()
+  )
+    await panel.getByRole('button', { name: '未保存の変更を破棄して削除', exact: true }).click();
+  await page.getByText('作品を保存・復元する', { exact: true }).click();
+  await expect(panel.getByRole('listitem')).toHaveCount(0);
+  await expect(panel.getByRole('alert')).toHaveCount(0);
+  await page.getByRole('button', { name: 'VOICEVOX・AivisSpeechを比較する', exact: true }).click();
+  await page.getByText('キャラクターの採用声ライブラリ', { exact: true }).click();
+  await page.getByText('台本を作成・試聴する', { exact: true }).click();
+  const script = page.getByRole('region', { name: '台本の試聴', exact: true });
+  await expect(script.getByRole('status').filter({ hasText: '台本：0行' })).toBeVisible();
+  await expect(script.getByRole('alert')).toHaveCount(0);
+});
 test('creates, protects unsaved edits, switches, renames, duplicates and deletes projects independently', async ({
   page,
 }, testInfo) => {

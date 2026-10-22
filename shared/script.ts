@@ -4,12 +4,21 @@ import { libraryCandidate } from './voice-library';
 
 export const scriptStorageKey = 'voice-atlas-script-v1';
 export const maxScriptBytes = 8 * 1024 * 1024;
-export const scriptLineSchema = z.object({
-  id: z.uuid(),
-  character: z.string().trim().min(1).max(100).optional(),
-  assignment: castingAssignmentSchema.nullable(),
-  text: z.string().max(300),
-});
+export const scriptLineSchema = z
+  .object({
+    id: z.uuid(),
+    character: z.string().trim().min(1).max(100).optional(),
+    assignment: castingAssignmentSchema.nullable(),
+    text: z.string().max(300),
+    spokenText: z
+      .string()
+      .min(1)
+      .max(300)
+      .refine((text) => Boolean(text.trim()), '読み上げ文を入力してください。')
+      .optional(),
+    readingSource: z.enum(['manual', 'dictionary']).optional(),
+  })
+  .refine((line) => !line.readingSource || line.spokenText !== undefined, '読み上げ文が必要です。');
 export type ScriptLine = z.infer<typeof scriptLineSchema>;
 export const scriptSchema = z
   .object({
@@ -43,7 +52,10 @@ export function scriptCandidate(line: ScriptLine) {
 }
 export function scriptAudioKey(line: ScriptLine) {
   const candidate = scriptCandidate(line);
-  return JSON.stringify([line.id, line.text, candidate?.voice, candidate?.recipe]);
+  return JSON.stringify([line.id, scriptSpokenText(line), candidate?.voice, candidate?.recipe]);
+}
+export function scriptSpokenText(line: ScriptLine) {
+  return line.spokenText ?? line.text;
 }
 export function serializeScript(script: VoiceScript) {
   const text = JSON.stringify(scriptSchema.parse(script), null, 2);

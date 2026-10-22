@@ -12,6 +12,15 @@
   --line: #e3e7df;
   --soft: #eff3ec;
 }
+.pronunciation-dictionary section,
+.pronunciation-dictionary fieldset {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.voice-script input[type='checkbox'] {
+  width: auto;
+}
 .project-panel,
 .connection-guide {
   max-width: 1304px;

@@ -21,6 +21,7 @@ import {
   type ProjectDocuments,
   type ProjectPart,
 } from '../../shared/project';
+import { pronunciationsSchema, type Pronunciation } from '../../shared/pronunciations';
 
 type Source = { snapshot: () => unknown; busy: () => boolean };
 type Context = {
@@ -31,6 +32,8 @@ type Context = {
   ensureIdle: () => void;
   commit: (project: VoiceProject, remount: boolean) => void;
   transition: (action: ProjectLibraryAction, current?: VoiceProject) => void;
+  pronunciations: Pronunciation[];
+  setPronunciations: (rules: Pronunciation[]) => void;
 };
 const ProjectContext = createContext<Context | null>(null);
 export function useProject() {
@@ -71,6 +74,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     }
   });
   const [initial, setInitial] = useState(loaded.project);
+  const [pronunciations, setReadings] = useState(loaded.project?.documents.pronunciations ?? []);
   const [loadError, setLoadError] = useState(loaded.error);
   const [revision, setRevision] = useState(0);
   const sources = useRef(new Map<ProjectPart, Source>());
@@ -93,6 +97,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         : emptyProjectDocuments());
     for (const [part, source] of sources.current)
       Object.assign(documents, { [part]: source.snapshot() });
+    documents.pronunciations = pronunciations;
     return documents;
   };
   const commit = (project: VoiceProject, remount: boolean) => {
@@ -101,6 +106,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     saveWorkspaceProject(project, localStorage, remount);
     setLoadError('');
     if (remount) {
+      setReadings(project.documents.pronunciations);
       setInitial(project);
       setRevision((value) => value + 1);
     }
@@ -109,16 +115,33 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     ensureIdle();
     const previousId = readWorkspaceProject(localStorage)?.id;
     const library = updateProjectLibrary(localStorage, action, current);
+    if (action.type === 'delete')
+      void import('./script-audio-store')
+        .then(({ deleteProjectAudio }) => deleteProjectAudio(action.id))
+        .catch(() => {
+          /* A cache cleanup failure must not undo a successful project deletion. */
+        });
     const next = library.projects.find((p) => p.id === library.activeId) ?? null;
     setLoadError('');
     if (action.type === 'open' || action.type === 'select' || previousId !== next?.id) {
+      setReadings(next?.documents.pronunciations ?? []);
       setInitial(next);
       setRevision((value) => value + 1);
     }
   };
   return (
     <ProjectContext.Provider
-      value={{ initial, loadError, register, capture, ensureIdle, commit, transition }}
+      value={{
+        initial,
+        loadError,
+        register,
+        capture,
+        ensureIdle,
+        commit,
+        transition,
+        pronunciations,
+        setPronunciations: (rules) => setReadings(pronunciationsSchema.parse(rules)),
+      }}
     >
       <Fragment key={revision}>{children}</Fragment>
     </ProjectContext.Provider>

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { pronunciationsSchema } from './pronunciations';
 import { characterInputSchema, profileSchema } from './schema';
 import { parseSavedRecipe } from './saved-recipe';
 import { castingSessionSchema, maxCastingSessionFileBytes } from './casting';
@@ -56,6 +57,7 @@ const projectSchema = z.object({
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   documents: z.object({
+    pronunciations: pronunciationsSchema.default([]),
     workbench: workbenchSchema.nullable(),
     casting: castingWorkSchema.nullable(),
     // Existing parsers also enforce document-specific byte limits and legacy versions.
@@ -276,6 +278,7 @@ export function legacyDocuments(storage: ProjectStorage): ProjectDocuments {
   const scripts = storage.getItem(scriptLibraryStorageKey);
   return {
     workbench: null,
+    pronunciations: [],
     casting: null,
     voiceLibrary: JSON.parse(serializeLibrary(library === null ? [] : parseLibrary(library))),
     libraryComparison: comparison === null ? null : parseLibraryComparison(comparison),
@@ -298,10 +301,11 @@ export function readWorkspaceDocument(key: string, storage: ProjectStorage = loc
   const part = Object.entries(documentKeys).find(([, item]) => item === key)?.[0] as
     keyof typeof documentKeys | undefined;
   if (!part) throw new Error('未対応の保存先です。');
-  if (!project)
-    return storage.getItem(projectLibraryStorageKey) === null
-      ? storage.getItem(key)
-      : JSON.stringify(emptyProjectDocuments()[part]);
+  if (!project) {
+    if (storage.getItem(projectLibraryStorageKey) === null) return storage.getItem(key);
+    const empty = emptyProjectDocuments()[part];
+    return empty === null ? null : JSON.stringify(empty);
+  }
   const value = project.documents[part];
   return value === null ? null : JSON.stringify(value);
 }
