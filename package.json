@@ -20,7 +20,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "probe:aivis": "tsx server/aivis-probe.ts",
-    "evaluate:voice": "tsx server/listening-probe.ts"
+    "evaluate:voice": "tsx server/listening-probe.ts",
+    "evaluate:irodori": "tsx server/irodori-probe.ts"
   },
   "dependencies": {
     "dotenv": "^18.0.8",

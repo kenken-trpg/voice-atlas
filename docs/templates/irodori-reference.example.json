@@ -1,0 +1,14 @@
+{
+  "format": "voice-atlas-irodori-config",
+  "version": 1,
+  "mode": "reference",
+  "checkpoint": "./models/base/model.safetensors",
+  "codecPath": "./models/codec/weights.pth",
+  "device": "mps",
+  "referenceWav": "./reference.wav",
+  "referenceNote": "参照音声の出所と使用条件を記録",
+  "seeds": [17, 29],
+  "steps": [20, 40],
+  "sentenceIds": ["greeting", "question", "urgent"],
+  "machineNote": "使用機器と、ほかの重い処理の有無"
+}

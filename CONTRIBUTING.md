@@ -3,6 +3,7 @@
 開発段階から公開するプロジェクトです。Issue・Pull Requestを歓迎します。
 
 - Node.js 24と `npm ci` で開発環境を用意してください。
+- 自動テストではPython 3.10以上の`python3`も使います。Irodoriのサブプロセス契約を標準ライブラリーと合成PCMで検証するためで、torch・モデル・Irodori本体のインストールは不要です。通常のアプリ起動にはPythonを使いません。
 - コード整形には `npm run format` を使います。
 - 変更後は `npm run format:check` と `npm run check` を実行します。checkには型検査を含む本番ビルドが含まれます。画面操作を変えた場合は `npm run test:e2e` も実行してください。実行前に `npx playwright install --only-shell chromium` でブラウザーを用意できます。
 - 台本の負荷を測る場合は `npm run benchmark:script` を実行します。通常のE2Eから分けた1ワーカーの測定です。結果の読み方と行数上限の判断は[台本負荷の測定](docs/script-performance.md)を参照してください。

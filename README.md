@@ -188,6 +188,8 @@ docs/                設計、出典、開発方針
 
 今後の開発は[開発計画](docs/roadmap.md)に沿って、実機評価・作品の保存と再開・台本制作の改善を進めます。実機で同じ6文を生成して待ち時間・条件を記録する `npm run evaluate:voice` と、[聴取評価の手順](docs/listening-evaluation.md)を用意しています。実機の聴取評価と初回利用者による確認は未実施です。
 
+Irodoriの声づくりに向けて、`npm run evaluate:irodori`で環境診断とローカル評価を行えます。VoiceDesignの説明文と通常モデルの参照音声を分け、文章・seed・生成ステップを比較し、音声・待ち時間・メモリー観測値を保存します。[技術検証の手順](docs/irodori-evaluation.md)を参照してください。実モデルでの品質・速度評価と画面への統合は未実施です。普段のアプリ利用にPythonやIrodoriの導入は不要です。
+
 詳しくは[操作マニュアル](docs/manual.md)、[設計](docs/architecture.md)、[カタログの出典](docs/catalog-sources.md)、[開発への参加](CONTRIBUTING.md)を参照してください。
 
 ## ライセンス

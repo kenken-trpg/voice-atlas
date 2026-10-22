@@ -1,5 +1,15 @@
 # 設計と初期版の範囲
 
+## Irodoriの独立した技術検証
+
+`shared/irodori-evaluation.ts`はWebアプリの声スキーマとは別に、VoiceDesignと参照音声の評価設定を定義する。caption・seed・step・既存の共通文を展開し、各caption/stepの最後に最初と同条件の再生成を置く。最大225音声で、重複・未知フィールド・モードの混在を生成前に拒否する。VOICEVOX/AivisSpeechの設定へ換算しない。
+
+`server/irodori-probe.ts`はCLI専用でWebサーバーからは呼ばない。設定ファイルを64KiBまで読み、相対パスを設定ファイルの位置で解決する。プラン表示ではPythonもモデルも起動しない。生成時はshellを介さず指定Pythonへ引数配列と標準入力のJSONを渡し、中止シグナルを転送する。
+
+`server/irodori-evaluate.py`は標準ライブラリーだけで診断できる。生成時だけ利用者が用意したIrodoriのruntimeをimportし、モデル・codecを一度読み込み、全音声を順次生成する。Hugging Face/Transformersのオフライン設定とPythonのsocket監査フックを使い、不足したファイルをネットワークから補わない。checkpoint/codec/参照音声はローカルファイルに限定する。上流が実際に読み込んだcaption/reference構成を照合して、無視される条件で評価を続けることを防ぐ。
+
+新規出力先を先に確保し、`voice-atlas-irodori-run` v1のmanifestを各音声後に更新する。WAV・有効設定・SHA-256・再生成時の一致・読み込み/生成時間・RTF・生成直後のメモリーと失敗/中止位置を保持する。既存出力先の再利用や自動再試行はしない。Python RSSは累積最大値、CUDAはtorch割り当ての最大値、MPSは観測時点の値であり、総メモリーや実用性を自動判定しない。生成成功も未聴取として扱い、既存の作品/台本/声ライブラリへの取り込みは実機評価後に設計する。[手順と制約](irodori-evaluation.md)。
+
 ## 複数作品・読み上げ文・保存音声
 
 作品一覧は`voice-atlas-project-library` v1を一つのlocalStorageキーに保持する。最大20作品・全体64MiBで、各作品には従来の32MiBと各個別形式の制限も適用する。選択中IDの所属・ID重複を検証し、保存と切り替えを一回の書き込みで反映する。従来の単体作品は一覧操作時に取り込み、元のキーを保持する。空の一覧は従来データへフォールバックしない。
@@ -208,6 +218,8 @@ Messages APIの `output_config.format` には対応範囲のJSONスキーマを�
 ## CI
 
 `npm run check` はユニット/APIテストと、型検査を含む本番ビルドを実行する。型検査を重複実行しない。単独の `npm run typecheck` も利用可能。
+
+IrodoriのCLI契約テストは`python3`（3.10以上）の標準ライブラリーと一時ディレクトリー内の合成ランタイムを使う。実際のtorch・モデル・Irodoriは不要で、既存のブラウザーテストにも実エンジンを追加しない。
 
 GitHub ActionsはmainへのpushとPull Requestで実行し、同じrefの古い実行はキャンセルする。npmキャッシュを使い、インストール時の監査通信は省く。監査は必要時に `npm audit --audit-level=high` で実行する。整形検査もCIで実施する。
 
