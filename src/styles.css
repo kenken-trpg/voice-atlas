@@ -39,6 +39,28 @@
   flex: none;
   margin-top: 0.35em;
 }
+.script-generation {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px;
+  background: var(--soft);
+  overflow-wrap: anywhere;
+}
+.script-generation progress {
+  width: 100%;
+  accent-color: var(--green);
+}
+.script-generation > ol {
+  list-style: none;
+  padding: 0;
+}
+.script-generation li {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.script-generation li p {
+  margin: 4px 0;
+}
 .project-panel,
 .connection-guide {
   max-width: 1304px;

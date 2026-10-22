@@ -38,6 +38,15 @@ import { ScriptImport } from './ScriptImport';
 import { PronunciationDictionary } from './PronunciationDictionary';
 import { ScriptRecast } from './ScriptRecast';
 import { ScriptSceneSettings } from './ScriptSceneSettings';
+import { ScriptGenerationPanel } from './ScriptGenerationPanel';
+import {
+  startGenerationJob,
+  updateGenerationRow,
+  finishGenerationJob,
+  generationRetryPlan,
+  type ScriptGenerationJob,
+  type ScriptRetryMode,
+} from '../../shared/script-generation';
 import { type ScriptRecastPlan } from '../../shared/script-recast';
 import { makeRecastSnapshot, undoScriptRecast } from '../../shared/script-recast-history';
 import { ScriptRecastHistory, type RecastMemory, type ScriptPreview } from './ScriptRecastHistory';
@@ -77,6 +86,9 @@ export function VoiceScript({
   const [notice, setNotice] = useState('');
   const [opened, setOpened] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [generationJob, setGenerationJob] = useState<ScriptGenerationJob | null>(null);
+  const generationRef = useRef<ScriptGenerationJob | null>(null);
+  const [stopping, setStopping] = useState(false);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [switching, setSwitching] = useState(false);
@@ -200,6 +212,30 @@ export function VoiceScript({
     return inventory?.engines.find((engine) => engine.engine === candidate.voice.engine)?.ready
       ? '未導入'
       : '未接続';
+  }
+  function generationIssue(line: ScriptLine) {
+    if (!line.text.trim()) return 'セリフを入力してください';
+    if (!scriptSpokenText(line).trim()) return '読み上げ文を入力してください';
+    const status = availability(line);
+    return status === '試聴可能' ? null : status;
+  }
+  function publishGeneration(job: ScriptGenerationJob | null) {
+    generationRef.current = job;
+    setGenerationJob(job);
+  }
+  function retryGeneration(mode: ScriptRetryMode) {
+    const job = generationRef.current;
+    if (!job || locked || running.current) return;
+    const plan = generationRetryPlan(script, job, mode);
+    if (plan.invalidIds.length) {
+      setError('生成条件が変わった行があります。台本側から対象を選び直してください。');
+      return;
+    }
+    void generate(
+      undefined,
+      plan.lines.map((line) => line.id),
+      job,
+    );
   }
   function act(action: () => void) {
     setError('');
@@ -329,7 +365,7 @@ export function VoiceScript({
         );
     });
   }
-  async function generate(forceId?: string, onlyIds?: string[]) {
+  async function generate(forceId?: string, onlyIds?: string[], previousJob?: ScriptGenerationJob) {
     if (
       locked ||
       !cacheReady ||
@@ -341,20 +377,29 @@ export function VoiceScript({
       checking
     )
       return;
+    if (previousJob && generationRef.current !== previousJob) return;
     const targets = script.lines.filter((line) =>
-      forceId ? line.id === forceId : (!onlyIds || onlyIds.includes(line.id)) && !audio(line),
+      forceId
+        ? line.id === forceId
+        : (!onlyIds || onlyIds.includes(line.id)) && (previousJob || !audio(line)),
     );
-    if (
-      !targets.length ||
-      targets.some(
-        (line) =>
-          !line.text.trim() || !scriptSpokenText(line).trim() || availability(line) !== '試聴可能',
-      )
-    )
+    if (!targets.length || targets.some((line) => generationIssue(line))) return;
+    let job: ScriptGenerationJob;
+    try {
+      job = startGenerationJob(script, targets, previousJob);
+    } catch {
+      setError('生成対象を確認できませんでした。現在の台本と音声は保持しています。');
       return;
+    }
+    const update = (next: ScriptGenerationJob) => {
+      job = next;
+      publishGeneration(next);
+    };
+    update(job);
     stop();
     running.current = true;
     setBusy(true);
+    setStopping(false);
     onBusyChange(true);
     setError('');
     setNotice('');
@@ -364,6 +409,7 @@ export function VoiceScript({
     try {
       for (const line of targets) {
         if (request.signal.aborted) break;
+        update(updateGenerationRow(job, line.id, 'generating'));
         setGeneratingId(line.id);
         const candidate = castingCandidateSchema.parse(scriptCandidate(line));
         const model = currentModel(candidate);
@@ -408,6 +454,7 @@ export function VoiceScript({
         previewRef.current = next;
         setPreviews(next);
         collectUrls();
+        update(updateGenerationRow(job, line.id, 'succeeded'));
         completed++;
       }
       setNotice(
@@ -417,14 +464,20 @@ export function VoiceScript({
       );
     } catch (e) {
       if (request.signal.aborted) setNotice('生成を中止しました。生成済みの行は保持しています。');
-      else
+      else {
+        const failedLine = targets[completed];
+        const message = e instanceof Error ? e.message : '音声を生成できませんでした。';
+        if (failedLine) update(updateGenerationRow(job, failedLine.id, 'failed', message));
         setError(
-          `第${script.lines.findIndex((line) => line.id === targets[completed]?.id) + 1}行：${e instanceof Error ? e.message : '音声を生成できませんでした。'} 生成済みの行は保持しています。`,
+          `第${script.lines.findIndex((line) => line.id === failedLine?.id) + 1}行：${message} 生成済みの行は保持しています。`,
         );
+      }
     } finally {
+      update(finishGenerationJob(job));
       controller.current = null;
       running.current = false;
       setBusy(false);
+      setStopping(false);
       setGeneratingId(null);
       onBusyChange(false);
     }
@@ -580,6 +633,7 @@ export function VoiceScript({
           onOpen={(value) => {
             discardRecastMemory();
             clear();
+            publishGeneration(null);
             setScript(value);
             setRecastIds([]);
             setError('');
@@ -735,7 +789,6 @@ export function VoiceScript({
           >
             未生成の行を台本順に生成
           </button>
-          {busy && <button onClick={() => controller.current?.abort()}>台本の生成を中止</button>}
           {recastIds.length > 0 && (
             <button
               className="secondary-button"
@@ -771,6 +824,20 @@ export function VoiceScript({
             台本の連続試聴を停止
           </button>
         </div>
+        <ScriptGenerationPanel
+          job={generationJob}
+          script={script}
+          busy={busy}
+          disabled={locked || !cacheReady || checking}
+          stopping={stopping}
+          issue={generationIssue}
+          onStop={() => {
+            setStopping(true);
+            controller.current?.abort();
+          }}
+          onRetry={retryGeneration}
+          onDismiss={() => publishGeneration(null)}
+        />
         <label>
           結合WAVの行間（ミリ秒）
           <input
