@@ -141,7 +141,7 @@ export function VoiceScript({
   }, [active, opened]);
   useEffect(() => {
     if (active && opened && !cacheReady) void restoreAudio(true);
-  }, [active, opened, disabled, busy, loading, exporting, switching, cacheReady]);
+  }, [active, opened, disabled, busy, loading, exporting, switching, cacheReady, script]);
   useEffect(
     () => () => {
       cacheGeneration.current++;
@@ -634,6 +634,9 @@ export function VoiceScript({
             discardRecastMemory();
             clear();
             publishGeneration(null);
+            cacheGeneration.current++;
+            cacheRunning.current = false;
+            setCacheReady(false);
             setScript(value);
             setRecastIds([]);
             setError('');

@@ -1,11 +1,16 @@
 import { z } from 'zod';
-import { scriptAudioKey, scriptCandidate, type ScriptLine } from '../../shared/script';
-import { libraryAuditionSchema, type LibraryAudition } from '../../shared/library-comparison';
+import { scriptAudioKey, type ScriptLine } from '../../shared/script';
+import { type LibraryAudition } from '../../shared/library-comparison';
+import {
+  maxSavedAudioBytes,
+  maxArchiveAudioEntries,
+  maxProjectAudioBytes,
+  validateSavedAudioBlob as validBlob,
+  validateScriptAudioAudition as auditionFor,
+} from '../../shared/script-audio-cache';
+export { maxSavedAudioBytes, maxProjectAudioBytes } from '../../shared/script-audio-cache';
 
 export const audioDatabaseName = 'voice-atlas-script-audio-v1';
-export const maxSavedAudioBytes = 128 * 1024 * 1024;
-export const maxProjectAudioBytes = 64 * 1024 * 1024;
-const maxEntryBytes = 20 * 1024 * 1024;
 type Entry = {
   id: string;
   projectId: string;
@@ -43,36 +48,18 @@ async function openDatabase() {
     };
   });
 }
-async function validBlob(blob: Blob) {
-  if (!(blob instanceof Blob) || blob.size < 12 || blob.size > maxEntryBytes)
-    throw new Error('保存できるWAVは1行20MiBまでです。');
-  const head = new Uint8Array(await blob.slice(0, 12).arrayBuffer());
-  if (
-    String.fromCharCode(...head.slice(0, 4)) !== 'RIFF' ||
-    String.fromCharCode(...head.slice(8, 12)) !== 'WAVE'
-  )
-    throw new Error('WAV形式を確認できませんでした。');
-}
-function auditionFor(line: ScriptLine, raw: unknown) {
-  const audition = libraryAuditionSchema.parse(raw),
-    voice = scriptCandidate(line)?.voice;
-  if (
-    !voice ||
-    (audition.generation && audition.generation.engine !== voice.engine) ||
-    (audition.modelInfo &&
-      (voice.engine !== 'AivisSpeech' ||
-        audition.modelInfo.speakerUuid.toLowerCase() !== voice.speakerUuid.toLowerCase() ||
-        audition.modelInfo.styleName !== voice.style))
-  )
-    throw new Error('保存音声と生成情報の話者が一致しません。');
-  return audition;
-}
 const entryId = (projectId: string, lineId: string) => JSON.stringify([projectId, lineId]);
 export async function saveScriptAudio(projectId: string, sources: AudioSave[]) {
+  return saveAudio(projectId, sources, 20);
+}
+export async function saveProjectArchiveAudio(projectId: string, sources: AudioSave[]) {
+  return saveAudio(projectId, sources, maxArchiveAudioEntries);
+}
+async function saveAudio(projectId: string, sources: AudioSave[], limit: number) {
   z.uuid().parse(projectId);
   if (
     !sources.length ||
-    sources.length > 20 ||
+    sources.length > limit ||
     new Set(sources.map((s) => s.line.id)).size !== sources.length
   )
     throw new Error('保存する台本音声が不正です。');
@@ -114,7 +101,7 @@ export async function saveScriptAudio(projectId: string, sources: AudioSave[]) {
               maxProjectAudioBytes
           )
             throw new Error(
-              '保存音声の容量上限です。この作品は64MiB、全作品で128MiBまでです。不要な保存音声を削除してください。',
+              '保存音声の容量上限です。この作品は64MiB、全作品で128MiB・1000行までです。不要な保存音声を削除してください。',
             );
           for (const entry of entries) {
             tx.objectStore('audio').put(entry);
@@ -141,7 +128,7 @@ export async function loadScriptAudio(projectId: string, lines: ScriptLine[]) {
       tx.oncomplete = () => resolve(found);
       tx.onabort = () => reject(tx.error);
       tx.onerror = () => reject(tx.error);
-      for (const line of lines) {
+      for (const line of new Map(lines.map((line) => [line.id, line])).values()) {
         const request = tx.objectStore('audio').get(entryId(projectId, line.id));
         request.onsuccess = () => {
           if (request.result) found.push(request.result);
@@ -154,7 +141,7 @@ export async function loadScriptAudio(projectId: string, lines: ScriptLine[]) {
   const result: { lineId: string; key: string; blob: Blob; audition: LibraryAudition }[] = [];
   for (const item of raw) {
     const entry = item as Entry;
-    const line = lines.find((l) => l.id === entry.lineId);
+    const line = lines.find((l) => l.id === entry.lineId && scriptAudioKey(l) === entry.audioKey);
     if (
       !line ||
       entry.projectId !== projectId ||

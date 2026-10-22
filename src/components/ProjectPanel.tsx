@@ -16,6 +16,7 @@ import {
 import { useProject } from '../lib/project-context';
 import { download } from '../lib/http';
 import { ProjectLibrary } from './ProjectLibrary';
+import { ProjectArchive } from './ProjectArchive';
 
 export function ProjectPanel() {
   const { initial, loadError, capture, ensureIdle, commit, transition } = useProject();
@@ -27,6 +28,8 @@ export function ProjectPanel() {
   const [recoverSingle, setRecoverSingle] = useState(false);
   const baseline = useRef<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [archiveLocked, setArchiveLocked] = useState(false);
+  const locked = loading || archiveLocked;
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [dirty, setDirty] = useState(false);
@@ -67,6 +70,7 @@ export function ProjectPanel() {
     return () => window.removeEventListener('beforeunload', prevent);
   }, [dirty, saved]);
   function act(action: () => void) {
+    if (archiveLocked) return;
     setError('');
     setNotice('');
     try {
@@ -154,7 +158,7 @@ export function ProjectPanel() {
     });
   }
   async function inspect(file?: File) {
-    if (!file || loading) return;
+    if (!file || locked) return;
     setLoading(true);
     setError('');
     setNotice('');
@@ -191,7 +195,7 @@ export function ProjectPanel() {
       <section aria-label="作品の保存と復元">
         <h2>声・配役・台本をまとめて保存</h2>
         <ProjectLibrary
-          disabled={loading || !!pending}
+          disabled={locked || !!pending}
           onRequest={request}
           onRename={(id, value) =>
             act(() => {
@@ -220,7 +224,7 @@ export function ProjectPanel() {
             aria-label="保存する作品名"
             value={name}
             maxLength={100}
-            disabled={loading || !!pending}
+            disabled={locked || !!pending}
             onChange={(e) => setName(e.target.value)}
           />
         </label>
@@ -242,28 +246,28 @@ export function ProjectPanel() {
         <div className="casting-actions">
           <button
             className="secondary-button"
-            disabled={loading || !!pending}
+            disabled={locked || !!pending}
             onClick={() => save(false)}
           >
             作品をブラウザに保存
           </button>
           <button
             className="secondary-button"
-            disabled={loading || !!pending}
+            disabled={locked || !!pending}
             onClick={() => save(true)}
           >
             作品JSONを書き出す
           </button>
           <button
             className="secondary-button"
-            disabled={loading || !!pending}
+            disabled={locked || !!pending}
             onClick={() => fileRef.current?.click()}
           >
             作品JSONを読み込む
           </button>
           <button
             className="secondary-button"
-            disabled={loading || !!pending}
+            disabled={locked || !!pending}
             onClick={() =>
               act(() => {
                 ensureIdle();
@@ -294,6 +298,11 @@ export function ProjectPanel() {
           accept=".json,application/json"
           aria-label="作品JSONファイル"
           onChange={(e) => void inspect(e.target.files?.[0])}
+        />
+        <ProjectArchive
+          disabled={loading || !!pending}
+          getProject={currentSnapshot}
+          onLockChange={setArchiveLocked}
         />
         {pending && (
           <div role="group" aria-label="作品の復元確認" className="project-confirmation">
