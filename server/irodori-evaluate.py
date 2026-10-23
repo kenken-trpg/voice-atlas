@@ -14,6 +14,7 @@ import sys
 import time
 import uuid
 from datetime import datetime, timezone
+from irodori_preflight import preflight, require_output_capacity
 
 
 def now():
@@ -94,6 +95,7 @@ def run(repo, output, plan):
     for name, asset in assets.items():
         if not asset.is_file():
             raise ValueError(f"{name}: ローカルファイルがありません: {asset}")
+    capacity = require_output_capacity(output, plan)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.mkdir()  # Reserve before imports/hashing/generation; never overwrite a run.
     manifest = {"format": "voice-atlas-irodori-run", "version": 1, "id": str(uuid.uuid4()),
@@ -104,7 +106,7 @@ def run(repo, output, plan):
                 "machine": {"platform": platform.system(), "release": platform.release(),
                 "arch": platform.machine(), "logicalCpus": os.cpu_count(), "python": sys.version.split()[0],
                 "packages": {name: version(name) for name in ["torch", "torchaudio", "transformers", "dacvae"]}},
-                "assets": {}, "loadMs": None, "afterLoadMemory": None,
+                "assets": {}, "outputCapacity": capacity, "loadMs": None, "afterLoadMemory": None,
                 "samples": [], "failedSampleId": None, "error": None,
                 "listening": {"status": "not-reviewed", "notes": "", "ratings": None}}
 
@@ -194,6 +196,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", required=True)
     parser.add_argument("--diagnose", action="store_true")
+    parser.add_argument("--preflight", action="store_true")
     parser.add_argument("--output")
     args = parser.parse_args()
     # Set before any third-party import; cached tokenizer files must already exist.
@@ -209,7 +212,16 @@ def main():
         return
     if not args.output:
         parser.error("--output is required for generation")
-    print(json.dumps(run(repo, Path(args.output).resolve(), json.load(sys.stdin)), ensure_ascii=False))
+    plan = json.load(sys.stdin)
+    output = Path(args.output).resolve()
+    if args.preflight:
+        result = preflight(repo, output, plan)
+        result["environment"] = inspect(repo)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        if result["status"] != "passed":
+            sys.exit(1)
+        return
+    print(json.dumps(run(repo, output, plan), ensure_ascii=False))
 
 
 def interrupt(_signal, _frame):

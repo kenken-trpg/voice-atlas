@@ -14,6 +14,7 @@ async function main() {
       config: { type: 'string' },
       output: { type: 'string' },
       plan: { type: 'boolean' },
+      preflight: { type: 'boolean' },
       help: { type: 'boolean' },
     },
   });
@@ -21,13 +22,17 @@ async function main() {
     console.log(`npm run evaluate:irodori -- [--repo ../Irodori-TTS] [--python /path/to/python]
 引数なし: Pythonと依存パッケージの診断のみ。モデルの読み込み・取得は行いません。
 --config 設定.json --plan: 生成する条件と件数を表示。ファイル保存・生成はしません。
+--config 設定.json --output 新しい出力先 --preflight: モデルを読み込まず、依存環境・ローカルファイル・tokenizer・出力容量を確認。
 --config 設定.json --output 新しい出力先: ローカルモデルで評価音声を順次生成。
 設定例・必要な準備・測定値の範囲は docs/irodori-evaluation.md を参照してください。`);
     return;
   }
-  if ((values.plan || values.output) && !values.config)
-    throw new Error('--plan / --output には --config が必要です。');
+  if ((values.plan || values.output || values.preflight) && !values.config)
+    throw new Error('--plan / --output / --preflight には --config が必要です。');
   if (values.plan && values.output) throw new Error('--plan と --output は併用できません。');
+  if (values.plan && values.preflight) throw new Error('--plan と --preflight は併用できません。');
+  if (values.preflight && !values.output)
+    throw new Error('--preflight には検査する --output が必要です。');
   const repo = resolve(values.repo ?? '../Irodori-TTS');
   let plan: ReturnType<typeof makeIrodoriPlan> | undefined;
   if (values.config) {
@@ -72,6 +77,7 @@ async function main() {
   const args = [bridge, '--repo', repo];
   if (plan) args.push('--output', resolve(values.output!));
   else args.push('--diagnose');
+  if (values.preflight) args.push('--preflight');
   const child = spawn(python, args, {
     shell: false,
     stdio: ['pipe', 'inherit', 'inherit'],

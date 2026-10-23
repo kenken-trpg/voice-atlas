@@ -190,6 +190,8 @@ docs/                設計、出典、開発方針
 
 Irodoriの声づくりに向けて、`npm run evaluate:irodori`で環境診断とローカル評価を行えます。VoiceDesignの説明文と通常モデルの参照音声を分け、文章・seed・生成ステップを比較し、音声・待ち時間・メモリー観測値を保存します。[技術検証の手順](docs/irodori-evaluation.md)を参照してください。実モデルでの品質・速度評価と画面への統合は未実施です。普段のアプリ利用にPythonやIrodoriの導入は不要です。
 
+評価設定と出力先へ`--preflight`を付けると、モデルの重みを読まずに、必要なファイル・依存環境・指定デバイス・tokenizerキャッシュ・出力容量を確認できます。出力先の作成やモデルの取得は行わず、不足をまとめて表示します。
+
 詳しくは[操作マニュアル](docs/manual.md)、[設計](docs/architecture.md)、[カタログの出典](docs/catalog-sources.md)、[開発への参加](CONTRIBUTING.md)を参照してください。
 
 ## ライセンス

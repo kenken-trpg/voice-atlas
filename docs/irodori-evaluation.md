@@ -27,7 +27,32 @@ npm run evaluate:irodori -- \
 
 リポジトリの既定値は作業ディレクトリーからの`../Irodori-TTS`。その`.venv/bin/python`が実行可能なら使い、なければ`python3`を使う。macOS/Linux向けの初期検証で、Windowsでの動作は未確認。診断はパッケージの存在・配布版を調べるだけで、import・デバイス・モデル読み込み・キャッシュの完全性を保証しない。
 
-2026-10-23のこのPCでは、Irodoriのソースは存在したが仮想環境はなく、選ばれたPython 3.14.6にはtorch・torchaudio・transformers・huggingface-hub・safetensors・dacvaeがなかった。生成可能な状態ではない。今回、環境やモデルの追加は行っていない。
+2026-10-23の初回診断では、Irodoriのソースは存在したが仮想環境はなく、選ばれたPython 3.14.6にはtorch・torchaudio・transformers・huggingface-hub・safetensors・dacvaeがなかった。後続の調査で既存のPython 3.12.13と3.11.15も見つかったが、Python 3.12での事前チェックでもtorch・dacvaeなどとモデル/codecファイルの不足を確認した。搭載メモリーは8GiB、ディスク空きは調査時に約3.3GiBだった。大きな環境・モデルの取得は行わず、保存先の確保を実機検証の前提とする。未使用のモデルをPC全体から網羅検索した結果ではなく、既定のキャッシュにはIrodori/DACVAEの配置が見つからなかった。
+
+## モデルを読み込む前の事前チェック
+
+設定と出力先を決めたら、`--preflight`で検査する。
+
+```sh
+npm run evaluate:irodori -- \
+  --repo ../Irodori-TTS \
+  --python /path/to/venv/bin/python \
+  --config .local-artifacts/irodori/design.json \
+  --output .local-artifacts/irodori/design-run-1 \
+  --preflight
+```
+
+出力先の作成・WAV生成・モデル/codecの重みの読み込み・ダウンロードは行わない。通常の診断と異なり、依存モジュールをimportし、指定デバイスの利用可否とtokenizerのオフライン読み込みまで確認する。torchのimportやtokenizerの読み込み自体には時間とメモリーを使う。
+
+- Python 3.10以上、runtimeソース、空でないローカルのcheckpoint/codec/参照音声。
+- safetensorsの最大1MiBのヘッダーと`config_json`。caption/referenceモードの一致。重みの内容・形状・完全性の検査ではない。
+- runtimeのimportと指定デバイスの解決、DACVAEのimport。参照音声モードでは正規化に必要なaudiotoolsも確認する。
+- checkpointで指定されたtext/caption tokenizerのキャッシュ読み込みと語彙数。`local_files_only: true`で不足を確認する。
+- 出力先が未使用であること、作成予定先の既存の親ディレクトリーの書き込み権限と空き容量。ディレクトリーは作らない。
+
+JSONの`status`は`passed`・`blocked`・`incomplete`。不明・不足項目はまとめて返し、`passed`以外は終了コード1にする。`.pt`は重みを読まずにメタデータを検査できないため`incomplete`となるが、従来の生成処理では引き続き使える。事前チェックを通っても、モデル/codecのロード成功やメモリー適合・音質は保証しない。codec内部の追加リソースなど、実ロード時だけ分かる不足もある。
+
+音声出力の容量見積もりは、1件につき30秒・48kHz・ステレオ・32bitとして約11MiBとヘッダー領域、全体に1MiBを加える保守的な値。28件の例では約309MiBになる。モデルやPython環境のインストール容量、swap、無制限のログ増加は含めない。容量は音声出力先のファイルシステムで測り、モデル配置先と同じとは限らない。通常の生成でも、モデルを読む前にこの容量チェックを実施し、不足なら出力先を作らず拒否する。空き容量は検査後にも変わるため、書き込み時の失敗は生成記録へ残す。
 
 ## 条件を確認してから生成する
 

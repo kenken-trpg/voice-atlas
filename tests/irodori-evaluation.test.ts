@@ -63,6 +63,11 @@ async function fixture(mode = 'voice-design') {
   await writeFile(join(repo, 'irodori_tts/__init__.py'), '');
   await writeFile(join(repo, 'torch.py'), '');
   await writeFile(
+    join(repo, 'dacvae.py'),
+    'class DACVAE:\n    @classmethod\n    def load(cls, *args): raise RuntimeError("must not load codec")\n',
+  );
+  await writeFile(join(repo, 'audiotools.py'), 'class AudioSignal: pass\n');
+  await writeFile(
     join(repo, 'irodori_tts/inference_runtime.py'),
     `from dataclasses import dataclass, field
 from types import SimpleNamespace
@@ -110,13 +115,60 @@ def save_wav(path, audio, rate):
     with wave.open(str(path), 'wb') as wav:
         wav.setparams((1, 2, rate, 0, 'NONE', 'not compressed'))
         wav.writeframes(struct.pack('<80h', *([audio.seed] * 80)))
+def resolve_runtime_device(device):
+    if os.environ.get('MOCK_NETWORK'): socket.create_connection(('127.0.0.1', 1))
+    if device != 'cpu': raise ValueError('synthetic device unavailable')
+    return device
+`,
+  );
+  await writeFile(
+    join(repo, 'irodori_tts/config.py'),
+    `from dataclasses import dataclass
+@dataclass
+class ModelConfig:
+    use_caption_condition: bool = False
+    text_tokenizer_repo: str = 'fixture-tokenizer'
+    text_add_bos: bool = True
+    text_vocab_size: int = 1
+    @property
+    def caption_tokenizer_repo_resolved(self): return self.text_tokenizer_repo
+    @property
+    def caption_add_bos_resolved(self): return self.text_add_bos
+    @property
+    def caption_vocab_size_resolved(self): return self.text_vocab_size
+`,
+  );
+  await writeFile(
+    join(repo, 'irodori_tts/tokenizer.py'),
+    `from types import SimpleNamespace
+import os
+class PretrainedTextTokenizer:
+    @classmethod
+    def from_pretrained(cls, **kwargs):
+        assert kwargs['local_files_only'] is True
+        if os.environ.get('MOCK_TOKENIZER_MISSING'): raise ValueError('synthetic tokenizer cache missing')
+        return SimpleNamespace(vocab_size=2 if os.environ.get('MOCK_VOCAB_MISMATCH') else 1)
 `,
   );
   const checkpoint = join(dir, 'model.safetensors');
   const codecPath = join(dir, 'weights.pth');
   const referenceWav = join(dir, 'reference.wav');
+  const header = Buffer.from(
+    JSON.stringify({
+      __metadata__: {
+        config_json: JSON.stringify({
+          use_caption_condition: mode === 'voice-design',
+          text_tokenizer_repo: 'fixture-tokenizer',
+          text_vocab_size: 1,
+        }),
+      },
+      synthetic: { dtype: 'F32', shape: [1], data_offsets: [0, 4] },
+    }),
+  );
+  const prefix = Buffer.alloc(8);
+  prefix.writeBigUInt64LE(BigInt(header.length));
   await Promise.all([
-    writeFile(checkpoint, 'synthetic checkpoint'),
+    writeFile(checkpoint, Buffer.concat([prefix, header, Buffer.alloc(4)])),
     writeFile(codecPath, 'synthetic codec'),
     writeFile(referenceWav, 'synthetic reference'),
   ]);
@@ -136,6 +188,8 @@ def save_wav(path, audio, rate):
         MOCK_MODE: mode,
         ...env,
       }),
+    preflight: (env = {}) =>
+      python(['--repo', repo, '--output', output, '--preflight'], JSON.stringify(plan), env),
     manifest: async () => JSON.parse(await readFile(join(output, 'manifest.json'), 'utf8')),
   };
 }
@@ -171,6 +225,189 @@ describe('Irodori spike plans', () => {
       { ...config, apiKey: 'must-not-be-used' },
     ])
       expect(irodoriEvaluationSchema.safeParse(invalid).success).toBe(false);
+  });
+});
+
+describe('read-only Irodori preflight', () => {
+  it('checks metadata, dependencies, device, cached tokenizers and capacity without loading weights or creating output', async () => {
+    const f = await fixture();
+    const before = await readdir(f.dir);
+    const result = await f.preflight({ MOCK_LOAD_ERROR: 'must not load model' });
+    expect(result.code).toBe(0);
+    const report = JSON.parse(result.stdout);
+    expect(report).toMatchObject({
+      status: 'passed',
+      modelLoaded: false,
+      generated: false,
+      plannedSamples: 5,
+    });
+    expect(report.checks.every((check: { status: string }) => check.status === 'passed')).toBe(
+      true,
+    );
+    expect(
+      report.checks
+        .find((check: { name: string }) => check.name === 'cached-tokenizers')
+        .detail.map((item: { kind: string }) => item.kind),
+    ).toEqual(['text', 'caption']);
+    expect(await readdir(f.dir)).toEqual(before);
+    await expect(readdir(f.output)).rejects.toThrow();
+  });
+  it('reports missing model, codec, runtime and output conflict together', async () => {
+    const f = await fixture();
+    await Promise.all([
+      rm(f.plan.config.checkpoint),
+      rm(f.plan.config.codecPath),
+      rm(join(f.repo, 'irodori_tts/inference_runtime.py')),
+      mkdir(f.output),
+    ]);
+    const result = await f.preflight();
+    expect(result.code).toBe(1);
+    const report = JSON.parse(result.stdout);
+    expect(
+      report.checks
+        .filter((check: { status: string }) => check.status === 'blocked')
+        .map((check: { name: string }) => check.name),
+    ).toEqual(
+      expect.arrayContaining([
+        'checkpoint',
+        'codec',
+        'runtime-source',
+        'output',
+        'runtime-import-and-device',
+      ]),
+    );
+    expect(await readdir(f.output)).toEqual([]);
+  });
+  it.each(['MOCK_TOKENIZER_MISSING', 'MOCK_VOCAB_MISMATCH'])(
+    'refuses a missing/incompatible offline tokenizer: %s',
+    async (key) => {
+      const f = await fixture('reference');
+      const result = await f.preflight({ [key]: '1' });
+      expect(result.code).toBe(1);
+      expect(JSON.parse(result.stdout).checks).toContainEqual(
+        expect.objectContaining({ name: 'cached-tokenizers', status: 'blocked' }),
+      );
+      await expect(readdir(f.output)).rejects.toThrow();
+    },
+  );
+  it('reports a wrong checkpoint mode, unavailable device and blocked networking without synthesizing', async () => {
+    const f = await fixture();
+    const { captions: _captions, ...common } = config;
+    f.plan.config = irodoriEvaluationSchema.parse({
+      ...common,
+      checkpoint: f.plan.config.checkpoint,
+      codecPath: f.plan.config.codecPath,
+      mode: 'reference',
+      referenceWav: join(f.dir, 'reference.wav'),
+      device: 'mps',
+    });
+    const result = await f.preflight();
+    expect(result.code).toBe(1);
+    expect(JSON.parse(result.stdout).checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'checkpoint-mode', status: 'blocked' }),
+        expect.objectContaining({ name: 'runtime-import-and-device', status: 'blocked' }),
+      ]),
+    );
+    const network = await f.preflight({ MOCK_NETWORK: '1' });
+    expect(JSON.parse(network.stdout).checks).toContainEqual(
+      expect.objectContaining({
+        name: 'runtime-import-and-device',
+        status: 'blocked',
+        detail: expect.stringContaining('ネットワーク'),
+      }),
+    );
+  });
+  it('bounds metadata reads and treats unsupported metadata as incomplete, not ready', async () => {
+    const f = await fixture();
+    const prefix = Buffer.alloc(8);
+    prefix.writeBigUInt64LE(BigInt(1024 * 1024 + 1));
+    await writeFile(f.plan.config.checkpoint, prefix);
+    const result = await f.preflight();
+    expect(JSON.parse(result.stdout).checks).toContainEqual(
+      expect.objectContaining({
+        name: 'checkpoint-metadata',
+        status: 'blocked',
+        detail: expect.stringContaining('1MiB'),
+      }),
+    );
+    const old = join(f.dir, 'model.pt');
+    await writeFile(old, 'synthetic unsupported checkpoint');
+    f.plan.config.checkpoint = old;
+    const unsupported = await f.preflight();
+    expect(unsupported.code).toBe(1);
+    expect(JSON.parse(unsupported.stdout).status).toBe('incomplete');
+  });
+  it('reports missing codec dependencies without loading codec weights', async () => {
+    const f = await fixture('reference');
+    await writeFile(
+      join(f.repo, 'audiotools.py'),
+      'raise ImportError("synthetic reference normalization dependency missing")',
+    );
+    const result = await f.preflight();
+    expect(result.code).toBe(1);
+    expect(JSON.parse(result.stdout).checks).toContainEqual(
+      expect.objectContaining({
+        name: 'codec-import',
+        status: 'blocked',
+        detail: expect.stringContaining('normalization dependency missing'),
+      }),
+    );
+    await expect(readdir(f.output)).rejects.toThrow();
+  });
+  it('checks the actual output filesystem and blocks low space before creating any output or loading weights', async () => {
+    const f = await fixture();
+    const script = `import sys, importlib
+from unittest.mock import patch
+from types import SimpleNamespace
+sys.path.insert(0, ${JSON.stringify(resolve('server'))})
+bridge = importlib.import_module('irodori-evaluate')
+sys.argv = ['bridge', '--repo', ${JSON.stringify(f.repo)}, '--output', ${JSON.stringify(f.output)}, '--preflight']
+with patch('irodori_preflight.shutil.disk_usage', return_value=SimpleNamespace(free=1)):
+    bridge.main()
+`;
+    const result = await start('python3', ['-c', script], JSON.stringify(f.plan)).result;
+    expect(result.code).toBe(1);
+    expect(JSON.parse(result.stdout).checks).toContainEqual(
+      expect.objectContaining({
+        name: 'output',
+        status: 'blocked',
+        detail: expect.stringContaining('空き容量'),
+      }),
+    );
+    const generation = script.replace(", '--preflight'", '');
+    const failed = await start('python3', ['-c', generation], JSON.stringify(f.plan), {
+      MOCK_LOAD_ERROR: 'must not load',
+    }).result;
+    expect(failed.code).toBe(1);
+    expect(failed.stderr).toContain('空き容量');
+    expect(failed.stderr).not.toContain('synthetic load failure');
+    await expect(readdir(f.output)).rejects.toThrow();
+  });
+  it('validates CLI preflight arguments and executes only preflight for a valid config', async () => {
+    const f = await fixture();
+    const file = join(f.dir, 'preflight.json');
+    await writeFile(file, JSON.stringify(f.plan.config));
+    const result = await cli(
+      [
+        '--repo',
+        f.repo,
+        '--python',
+        'python3',
+        '--config',
+        file,
+        '--output',
+        f.output,
+        '--preflight',
+      ],
+      { MOCK_LOAD_ERROR: 'must not load' },
+    ).result;
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout).status).toBe('passed');
+    expect((await cli(['--preflight']).result).code).toBe(1);
+    expect((await cli(['--preflight', '--config', file]).result).code).toBe(1);
+    expect((await cli(['--preflight', '--config', file, '--plan']).result).code).toBe(1);
+    await expect(readdir(f.output)).rejects.toThrow();
   });
 });
 
