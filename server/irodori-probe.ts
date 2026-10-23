@@ -15,6 +15,9 @@ async function main() {
       output: { type: 'string' },
       plan: { type: 'boolean' },
       preflight: { type: 'boolean' },
+      'inspect-run': { type: 'string' },
+      'recover-run': { type: 'string' },
+      'allow-legacy-run': { type: 'boolean' },
       help: { type: 'boolean' },
     },
   });
@@ -24,7 +27,39 @@ async function main() {
 --config 設定.json --plan: 生成する条件と件数を表示。ファイル保存・生成はしません。
 --config 設定.json --output 新しい出力先 --preflight: モデルを読み込まず、依存環境・ローカルファイル・tokenizer・出力容量を確認。
 --config 設定.json --output 新しい出力先: ローカルモデルで評価音声を順次生成。
+--inspect-run 既存の出力先: 記録と保存済みWAVを点検。変更はしません。
+--recover-run 既存の出力先: 停止済みのrunningランをinterruptedに整理。元の記録をバックアップします。
+古いPIDなしのランだけ、停止を別途確認して --allow-legacy-run を追加します。
 設定例・必要な準備・測定値の範囲は docs/irodori-evaluation.md を参照してください。`);
+    return;
+  }
+  const runPath = values['inspect-run'] ?? values['recover-run'];
+  if (values['inspect-run'] && values['recover-run'])
+    throw new Error('--inspect-run と --recover-run は併用できません。');
+  if (values['allow-legacy-run'] && !values['recover-run'])
+    throw new Error('--allow-legacy-run には --recover-run が必要です。');
+  if (runPath && (values.config || values.output || values.plan || values.preflight || values.repo))
+    throw new Error('既存ランの点検・整理は生成・診断の引数と併用できません。');
+  if (runPath) {
+    const bridge = fileURLToPath(new URL('./irodori-evaluate.py', import.meta.url));
+    const args = [
+      bridge,
+      values['inspect-run'] ? '--inspect-run' : '--recover-run',
+      resolve(runPath),
+    ];
+    if (values['allow-legacy-run']) args.push('--allow-legacy-run');
+    const child = spawn(values.python ?? 'python3', args, {
+      shell: false,
+      stdio: 'inherit',
+      env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' },
+    });
+    await new Promise<void>((done, reject) => {
+      child.once('error', reject);
+      child.once('close', (code, signal) => {
+        process.exitCode = code ?? (signal ? 130 : 1);
+        done();
+      });
+    });
     return;
   }
   if ((values.plan || values.output || values.preflight) && !values.config)

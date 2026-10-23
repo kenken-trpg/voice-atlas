@@ -581,4 +581,81 @@ describe('Irodori subprocess contract (synthetic runtime only)', () => {
       await running.result;
     }
   });
+  it('inspects a stopped run and recovers it without changing saved audio or inventing a finish time', async () => {
+    const f = await fixture();
+    expect((await f.run()).code).toBe(0);
+    const manifest = await f.manifest();
+    manifest.status = 'running';
+    manifest.phase = 'generate';
+    manifest.failedSampleId = 'sample-002';
+    manifest.finishedAt = null;
+    manifest.runnerPid = 99999999;
+    await writeFile(join(f.output, 'manifest.json'), JSON.stringify(manifest));
+    const wav = await readFile(join(f.output, 'sample-001.wav'));
+    const inspected = await cli(['--inspect-run', f.output, '--python', 'python3']).result;
+    expect(inspected.code).toBe(0);
+    expect(JSON.parse(inspected.stdout)).toMatchObject({
+      status: 'running',
+      runnerActive: false,
+      recoverable: true,
+      issues: [],
+    });
+    expect(
+      (await readdir(f.output)).some((name) => name.startsWith('manifest.before-recovery-')),
+    ).toBe(false);
+    const recovered = await cli(['--recover-run', f.output, '--python', 'python3']).result;
+    expect(recovered.code).toBe(0);
+    expect(JSON.parse(recovered.stdout)).toMatchObject({ status: 'interrupted', savedSamples: 5 });
+    expect(await f.manifest()).toMatchObject({
+      status: 'interrupted',
+      phase: 'generate',
+      failedSampleId: 'sample-002',
+      finishedAt: null,
+      recovery: { reason: 'runner-not-active' },
+    });
+    const backup = (await readdir(f.output)).find((name) =>
+      name.startsWith('manifest.before-recovery-'),
+    )!;
+    expect(JSON.parse(await readFile(join(f.output, backup), 'utf8'))).toEqual(manifest);
+    expect(await readFile(join(f.output, 'sample-001.wav'))).toEqual(wav);
+    expect((await cli(['--recover-run', f.output, '--python', 'python3']).result).code).toBe(1);
+  });
+  it('refuses recovery while a runner is alive or the recorded audio differs', async () => {
+    const f = await fixture();
+    expect((await f.run()).code).toBe(0);
+    const manifest = await f.manifest();
+    manifest.status = 'running';
+    manifest.runnerPid = process.pid;
+    await writeFile(join(f.output, 'manifest.json'), JSON.stringify(manifest));
+    expect((await cli(['--recover-run', f.output, '--python', 'python3']).result).code).toBe(1);
+    manifest.runnerPid = 99999999;
+    await writeFile(join(f.output, 'manifest.json'), JSON.stringify(manifest));
+    await writeFile(join(f.output, 'sample-001.wav'), 'damaged');
+    const inspected = await cli(['--inspect-run', f.output, '--python', 'python3']).result;
+    expect(JSON.parse(inspected.stdout).issues).toEqual([
+      expect.stringContaining('sample-001.wav'),
+    ]);
+    expect((await cli(['--recover-run', f.output, '--python', 'python3']).result).code).toBe(1);
+    expect(
+      (await readdir(f.output)).some((name) => name.startsWith('manifest.before-recovery-')),
+    ).toBe(false);
+  });
+  it('requires an explicit override for an old run without a recorded PID', async () => {
+    const f = await fixture();
+    expect((await f.run()).code).toBe(0);
+    const manifest = await f.manifest();
+    manifest.status = 'running';
+    delete manifest.runnerPid;
+    await writeFile(join(f.output, 'manifest.json'), JSON.stringify(manifest));
+    expect((await cli(['--recover-run', f.output, '--python', 'python3']).result).code).toBe(1);
+    const recovered = await cli([
+      '--recover-run',
+      f.output,
+      '--allow-legacy-run',
+      '--python',
+      'python3',
+    ]).result;
+    expect(recovered.code).toBe(0);
+    expect((await f.manifest()).recovery.reason).toBe('legacy-run-manually-confirmed');
+  });
 });

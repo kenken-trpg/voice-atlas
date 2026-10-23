@@ -78,7 +78,22 @@ VoiceDesign例はcaption 2種類×step 2種類×（seed 2種類×共通文3種�
 
 Hugging FaceとTransformersのオフライン設定を有効にし、Python内のsocket接続・名前解決も拒否する。必要なキャッシュが足りない場合は失敗する。これは評価処理の誤接続を防ぐための実装で、指定したPythonやIrodoriコードを隔離するセキュリティー境界ではない。
 
-既存の出力ディレクトリーは、モデル読み込み前に拒否する。途中失敗後の続きの実行や自動再試行はしない。再実行には新しい出力先を指定する。Ctrl+Cで中止し、成功済み音声と停止箇所を残す。ただしOSによる強制終了やメモリー不足の強制停止では後処理を保証できず、最後の記録が`running`のまま残る場合がある。
+既存の出力ディレクトリーは、モデル読み込み前に拒否する。途中失敗後の続きの実行や自動再試行はしない。再実行には新しい出力先を指定する。Ctrl+Cで中止し、成功済み音声と停止箇所を残す。ただしOSによる強制終了やメモリー不足の強制停止では後処理を保証できず、最後の記録が`running`のまま残る場合がある。新しいランは実行PIDを記録する。
+
+### 停止したランの点検と整理
+
+```sh
+# 読み取り専用。実行状態、保存済みWAVの容量・SHA-256と記録外のWAVを確認する。
+npm run evaluate:irodori -- --inspect-run .local-artifacts/irodori/design-run-15
+
+# runnerActiveがfalseでissuesが空のrunningランだけ整理する。
+npm run evaluate:irodori -- --recover-run /path/to/stopped-run
+
+# 実行PIDの記録がない旧ランは、プロセス停止を別途確認したうえで明示する。
+npm run evaluate:irodori -- --recover-run /path/to/old-stopped-run --allow-legacy-run
+```
+
+整理は`status`を`interrupted`にして`recovery.recoveredAt`と理由を記録する。終了時刻は分からないため`finishedAt`はnullのまま残し、停止時に記録されていた`phase`・`failedSampleId`も保持する。元の記録は同じディレクトリーの`manifest.before-recovery-*.json`に保存する。WAV・`runtime.log`・聴取状態は変更しない。記録済みWAVの不在・不一致、記録外のWAV、稼働中のPIDがあれば整理を拒否する。PIDのない旧ランは稼働確認ができないため明示オプションなしでは拒否する。PIDは再利用され得るため、稼働中と判定されたら実際のプロセスを確認する。`--inspect-run`と`--recover-run`にはモデルやIrodoriの導入は不要で、Python標準ライブラリーだけを使う。
 
 ## 出力と測定値の範囲
 

@@ -15,6 +15,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from irodori_preflight import preflight, require_output_capacity
+from irodori_recovery import inspect_run, recover_run
 
 
 def now():
@@ -100,6 +101,7 @@ def run(repo, output, plan):
     output.mkdir()  # Reserve before imports/hashing/generation; never overwrite a run.
     manifest = {"format": "voice-atlas-irodori-run", "version": 1, "id": str(uuid.uuid4()),
                 "createdAt": now(), "finishedAt": None, "status": "running", "phase": "prepare",
+                "runnerPid": os.getpid(),
                 "plan": plan, "source": {"revision": git(repo, "rev-parse", "HEAD"),
                 "dirty": git(repo, "status", "--porcelain", "--untracked-files=no"),
                 "runtimeSha256": digest(runtime_source)},
@@ -194,11 +196,27 @@ def run(repo, output, plan):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--repo", required=True)
+    parser.add_argument("--repo")
     parser.add_argument("--diagnose", action="store_true")
     parser.add_argument("--preflight", action="store_true")
     parser.add_argument("--output")
+    parser.add_argument("--inspect-run")
+    parser.add_argument("--recover-run")
+    parser.add_argument("--allow-legacy-run", action="store_true")
     args = parser.parse_args()
+    if args.inspect_run or args.recover_run:
+        if args.inspect_run and args.recover_run:
+            parser.error("--inspect-run and --recover-run cannot be combined")
+        if args.allow_legacy_run and not args.recover_run:
+            parser.error("--allow-legacy-run requires --recover-run")
+        result = (recover_run(args.recover_run, args.allow_legacy_run) if args.recover_run
+                  else inspect_run(args.inspect_run))
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+    if args.allow_legacy_run:
+        parser.error("--allow-legacy-run requires --recover-run")
+    if not args.repo:
+        parser.error("--repo is required for diagnosis or generation")
     # Set before any third-party import; cached tokenizer files must already exist.
     os.environ.update(HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1", HF_HUB_DISABLE_TELEMETRY="1")
     def offline(event, _args):
