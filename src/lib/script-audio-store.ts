@@ -13,6 +13,11 @@ import {
 export { maxSavedAudioBytes, maxProjectAudioBytes } from '../../shared/script-audio-cache';
 
 export const audioDatabaseName = 'voice-atlas-script-audio-v1';
+export class SavedAudioChangedError extends Error {
+  constructor() {
+    super('保存音声量が変わりました。内容を確認してからもう一度削除してください。');
+  }
+}
 type Entry = {
   id: string;
   projectId: string;
@@ -211,15 +216,23 @@ export async function loadScriptAudio(projectId: string, lines: ScriptLine[]) {
   }
   return result;
 }
-export async function deleteProjectAudio(projectId: string | null) {
+export async function deleteProjectAudio(
+  projectId: string | null,
+  expected?: { bytes: number; entries: number },
+) {
   if (projectId !== null) z.uuid().parse(projectId);
+  if (projectId === null && expected)
+    throw new Error('全作品の削除には個別作品の確認値を指定できません。');
   const db = await openDatabase();
   try {
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(['audio', 'sizes'], 'readwrite');
+      let failure: unknown;
       tx.oncomplete = () => resolve();
-      tx.onabort = () => reject(tx.error);
-      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(failure ?? tx.error);
+      tx.onerror = () => {
+        failure ??= tx.error;
+      };
       if (projectId === null) {
         tx.objectStore('audio').clear();
         tx.objectStore('sizes').clear();
@@ -228,13 +241,23 @@ export async function deleteProjectAudio(projectId: string | null) {
       const request = tx
         .objectStore('sizes')
         .index('projectId')
-        .openCursor(IDBKeyRange.only(projectId));
+        .getAll(IDBKeyRange.only(projectId));
       request.onsuccess = () => {
-        const cursor = request.result;
-        if (cursor) {
-          tx.objectStore('audio').delete(cursor.primaryKey);
-          cursor.delete();
-          cursor.continue();
+        try {
+          const sizes = request.result as Size[];
+          if (
+            expected &&
+            (sizes.length !== expected.entries ||
+              sizes.reduce((sum, item) => sum + item.bytes, 0) !== expected.bytes)
+          )
+            throw new SavedAudioChangedError();
+          for (const item of sizes) {
+            tx.objectStore('audio').delete(item.id);
+            tx.objectStore('sizes').delete(item.id);
+          }
+        } catch (cause) {
+          failure = cause;
+          tx.abort();
         }
       };
     });

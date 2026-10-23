@@ -29,7 +29,8 @@ export function ProjectPanel() {
   const baseline = useRef<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [archiveLocked, setArchiveLocked] = useState(false);
-  const locked = loading || archiveLocked;
+  const [libraryLocked, setLibraryLocked] = useState(false);
+  const locked = loading || archiveLocked || libraryLocked;
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [dirty, setDirty] = useState(false);
@@ -197,6 +198,7 @@ export function ProjectPanel() {
         <ProjectLibrary
           disabled={locked || !!pending}
           onRequest={request}
+          onLockChange={setLibraryLocked}
           onRename={(id, value) =>
             act(() => {
               transition({ type: 'rename', id, name: value });

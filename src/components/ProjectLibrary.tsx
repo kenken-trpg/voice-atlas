@@ -8,16 +8,24 @@ import {
   type VoiceProject,
 } from '../../shared/project';
 import { savedAudioChangedEvent } from '../lib/script-audio-events';
+import { useProject } from '../lib/project-context';
+
+type AudioUsage = { bytes: number; entries: number };
+type AudioDeletion = AudioUsage & { id: string; name: string };
+const formatMiB = (bytes: number) => (bytes / 1024 ** 2).toFixed(2);
 
 export function ProjectLibrary({
   disabled,
   onRequest,
   onRename,
+  onLockChange,
 }: {
   disabled: boolean;
   onRequest: (action: ProjectLibraryAction, project: VoiceProject) => void;
   onRename: (id: string, name: string) => void;
+  onLockChange: (locked: boolean) => void;
 }) {
+  const { ensureIdle } = useProject();
   const [projects, setProjects] = useState<VoiceProject[]>([]);
   const [active, setActive] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -29,6 +37,12 @@ export function ProjectLibrary({
     { bytes: number; entries: number }
   > | null>(null);
   const [audioError, setAudioError] = useState(false);
+  const [audioDeletion, setAudioDeletion] = useState<AudioDeletion | null>(null);
+  const [deletingAudio, setDeletingAudio] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+  const [deleteNotice, setDeleteNotice] = useState('');
+  const locked = disabled || deletingAudio;
+  useEffect(() => onLockChange(deletingAudio), [deletingAudio, onLockChange]);
   useEffect(() => {
     function refresh() {
       try {
@@ -75,18 +89,81 @@ export function ProjectLibrary({
       clearInterval(timer);
     };
   }, []);
+  async function confirmAudioDeletion() {
+    if (!audioDeletion || locked) return;
+    setDeletingAudio(true);
+    setDeleteError('');
+    setDeleteNotice('');
+    try {
+      ensureIdle();
+      const project = readProjectLibrary(localStorage).projects.find(
+        (item) => item.id === audioDeletion.id,
+      );
+      if (!project) {
+        setAudioDeletion(null);
+        throw new Error('対象の作品が一覧からなくなりました。');
+      }
+      const { readSavedAudioByProject, deleteProjectAudio, SavedAudioChangedError } =
+        await import('../lib/script-audio-store');
+      const fresh = await readSavedAudioByProject();
+      const usage = fresh.get(audioDeletion.id) ?? { bytes: 0, entries: 0 };
+      setAudioByProject(fresh);
+      setAudioError(false);
+      if (
+        project.name !== audioDeletion.name ||
+        usage.bytes !== audioDeletion.bytes ||
+        usage.entries !== audioDeletion.entries
+      ) {
+        setAudioDeletion({ id: project.id, name: project.name, ...usage });
+        setDeleteNotice(
+          '作品名または保存音声量が変わりました。内容を確認してからもう一度削除してください。',
+        );
+        return;
+      }
+      if (!usage.entries) {
+        setAudioDeletion(null);
+        setDeleteNotice('この作品の保存音声はありません。');
+        return;
+      }
+      try {
+        await deleteProjectAudio(project.id, usage);
+      } catch (cause) {
+        if (!(cause instanceof SavedAudioChangedError)) throw cause;
+        const changed = await readSavedAudioByProject();
+        const latest = changed.get(project.id) ?? { bytes: 0, entries: 0 };
+        setAudioByProject(changed);
+        setAudioDeletion({ id: project.id, name: project.name, ...latest });
+        setDeleteNotice('保存音声量が変わりました。内容を確認してからもう一度削除してください。');
+        return;
+      }
+      setAudioDeletion(null);
+      setDeleteNotice(
+        `「${project.name}」の保存音声${usage.entries}行を削除しました。作品の設定と編集中の試聴音声は保持しています。`,
+      );
+    } catch (cause) {
+      setDeleteError(
+        cause instanceof Error && cause.message.length < 200
+          ? cause.message
+          : '保存音声を削除できませんでした。現在の音声は保持しています。',
+      );
+    } finally {
+      setDeletingAudio(false);
+    }
+  }
   return (
     <section aria-label="作品ライブラリ" className="library-comparison">
       <h3>作品ライブラリ</h3>
       <p>
         最大{maxProjectCount}
-        作品。作品ごとに声・配役・台本を分けて保存します。保存音声を整理する場合は、作品を開いて台本音声の保存と再利用から削除できます。
+        作品。作品ごとに声・配役・台本を分けて保存します。保存音声は作品ごとに確認して削除できます。
       </p>
       {error && <p role="alert">{error}</p>}
       {audioError && <p role="status">保存音声量を確認できません。作品の操作は続けられます。</p>}
+      {deleteError && <p role="alert">{deleteError}</p>}
+      {deleteNotice && <p role="status">{deleteNotice}</p>}
       <button
         className="secondary-button"
-        disabled={disabled || projects.length >= maxProjectCount}
+        disabled={locked || projects.length >= maxProjectCount}
         onClick={() => {
           const project = makeEmptyProject();
           onRequest({ type: 'open', project }, project);
@@ -117,7 +194,7 @@ export function ProjectLibrary({
               <p>
                 保存音声：
                 {audioByProject
-                  ? `${((audioByProject.get(project.id)?.bytes ?? 0) / 1024 ** 2).toFixed(2)}MiB・${audioByProject.get(project.id)?.entries ?? 0}行`
+                  ? `${formatMiB(audioByProject.get(project.id)?.bytes ?? 0)}MiB・${audioByProject.get(project.id)?.entries ?? 0}行`
                   : audioError
                     ? '確認できません'
                     : '確認中…'}
@@ -126,14 +203,14 @@ export function ProjectLibrary({
               <div className="casting-actions">
                 <button
                   className="secondary-button"
-                  disabled={disabled || active === project.id}
+                  disabled={locked || active === project.id}
                   onClick={() => onRequest({ type: 'select', id: project.id }, project)}
                 >
                   この作品を開く
                 </button>
                 <button
                   className="secondary-button"
-                  disabled={disabled}
+                  disabled={locked}
                   onClick={() => {
                     setEditing(project.id);
                     setName(project.name);
@@ -143,7 +220,7 @@ export function ProjectLibrary({
                 </button>
                 <button
                   className="secondary-button"
-                  disabled={disabled || projects.length >= maxProjectCount}
+                  disabled={locked || projects.length >= maxProjectCount}
                   onClick={() => {
                     const now = new Date().toISOString();
                     const copy = {
@@ -160,12 +237,48 @@ export function ProjectLibrary({
                 </button>
                 <button
                   className="text-button"
-                  disabled={disabled}
+                  disabled={locked}
                   onClick={() => onRequest({ type: 'delete', id: project.id }, project)}
                 >
                   この作品を削除
                 </button>
+                <button
+                  className="text-button"
+                  disabled={locked || !audioByProject?.get(project.id)?.entries}
+                  onClick={() => {
+                    const usage = audioByProject?.get(project.id);
+                    if (!usage?.entries) return;
+                    setAudioDeletion({ id: project.id, name: project.name, ...usage });
+                    setDeleteError('');
+                    setDeleteNotice('');
+                  }}
+                >
+                  保存音声を削除
+                </button>
               </div>
+              {audioDeletion?.id === project.id && (
+                <div role="group" aria-label="作品の保存音声の削除確認">
+                  <p>
+                    「{audioDeletion.name}」の保存音声{audioDeletion.entries}行・
+                    {formatMiB(audioDeletion.bytes)}
+                    MiBを削除します。作品の設定・台本と編集中の試聴音声は保持します。
+                  </p>
+                  <button
+                    className="secondary-button"
+                    disabled={locked}
+                    onClick={() => void confirmAudioDeletion()}
+                  >
+                    確認した保存音声を削除
+                  </button>
+                  <button
+                    className="text-button"
+                    disabled={locked}
+                    onClick={() => setAudioDeletion(null)}
+                  >
+                    保存音声の削除をキャンセル
+                  </button>
+                </div>
+              )}
               {editing === project.id && (
                 <div>
                   <label>
@@ -174,13 +287,13 @@ export function ProjectLibrary({
                       aria-label="変更後の作品名"
                       value={name}
                       maxLength={100}
-                      disabled={disabled}
+                      disabled={locked}
                       onChange={(e) => setName(e.target.value)}
                     />
                   </label>
                   <button
                     className="secondary-button"
-                    disabled={disabled || !name.trim()}
+                    disabled={locked || !name.trim()}
                     onClick={() => {
                       onRename(project.id, name);
                       setEditing(null);

@@ -205,6 +205,86 @@ test('does not reuse another project cache when a project is duplicated, and rec
   await expect(panel.locator(':scope > ol audio')).toHaveCount(2);
   expect(calls()).toBe(2);
 });
+test('deletes one project’s saved audio from the project list after confirmation', async ({
+  page,
+}) => {
+  const { panel, calls } = await setup(page);
+  await panel.getByRole('button', { name: '未生成の行を台本順に生成', exact: true }).click();
+  await expect(panel.locator(':scope > ol audio')).toHaveCount(2);
+  const projects = await saveProject(page);
+  const cache = await openCache(panel);
+  await cache.getByRole('button', { name: '台本音声をブラウザに保存', exact: true }).click();
+  const item = projects.getByRole('listitem', { name: '保存作品 導入シナリオ', exact: true });
+  await expect(item).toContainText('保存音声：0.01MiB・2行');
+  await item.getByRole('button', { name: '保存音声を削除', exact: true }).click();
+  const confirmation = item.getByRole('group', { name: '作品の保存音声の削除確認' });
+  await expect(confirmation).toContainText('「導入シナリオ」の保存音声2行');
+  await confirmation.getByRole('button', { name: '保存音声の削除をキャンセル' }).click();
+  await expect(item).toContainText('保存音声：0.01MiB・2行');
+  await item.getByRole('button', { name: '保存音声を削除', exact: true }).click();
+  await page.evaluate(
+    (projectId) =>
+      new Promise<void>((resolve, reject) => {
+        const request = indexedDB.open('voice-atlas-script-audio-v1', 1);
+        request.onsuccess = () => {
+          const db = request.result;
+          const tx = db.transaction('sizes', 'readwrite');
+          tx.objectStore('sizes').put({ id: 'changed-after-confirmation', projectId, bytes: 2048 });
+          tx.oncomplete = () => {
+            db.close();
+            resolve();
+          };
+          tx.onabort = () => {
+            db.close();
+            reject(tx.error);
+          };
+        };
+        request.onerror = () => reject(request.error);
+      }),
+    fixture.id,
+  );
+  await confirmation.getByRole('button', { name: '確認した保存音声を削除' }).click();
+  await expect(projects.getByRole('status').filter({ hasText: 'もう一度削除' })).toBeVisible();
+  await expect(confirmation).toContainText('保存音声3行');
+  await expect(panel.locator(':scope > ol audio')).toHaveCount(2);
+  await confirmation.getByRole('button', { name: '確認した保存音声を削除' }).click();
+  await expect(item).toContainText('保存音声：0.00MiB・0行');
+  await expect(item.getByRole('button', { name: '保存音声を削除', exact: true })).toBeDisabled();
+  await expect(panel.locator(':scope > ol audio')).toHaveCount(2);
+  await page.reload();
+  await expand(page);
+  await expect(panel.locator(':scope > ol audio')).toHaveCount(0);
+  expect(calls()).toBe(2);
+});
+test('deletes saved audio for an inactive project without changing the active project', async ({
+  page,
+}) => {
+  const { panel } = await setup(page);
+  await panel.getByRole('button', { name: '未生成の行を台本順に生成', exact: true }).click();
+  const projects = await saveProject(page);
+  const cache = await openCache(panel);
+  await cache.getByRole('button', { name: '台本音声をブラウザに保存', exact: true }).click();
+  await projects.getByRole('button', { name: '保存済みの作品を複製', exact: true }).click();
+  await projects.getByRole('button', { name: '確認した作品を復元', exact: true }).click();
+  await page.getByText('作品を保存・復元する', { exact: true }).click();
+  const original = projects.getByRole('listitem', { name: '保存作品 導入シナリオ', exact: true });
+  const copy = projects.getByRole('listitem', {
+    name: '保存作品 導入シナリオ（コピー）',
+    exact: true,
+  });
+  await expect(original).toContainText('保存音声：0.01MiB・2行');
+  await expect(copy).toContainText('保存音声：0.00MiB・0行');
+  await original.getByRole('button', { name: '保存音声を削除', exact: true }).click();
+  const confirmation = original.getByRole('group', { name: '作品の保存音声の削除確認' });
+  await expect(confirmation).toContainText('「導入シナリオ」の保存音声2行');
+  await confirmation.getByRole('button', { name: '確認した保存音声を削除' }).click();
+  await expect(original).toContainText('保存音声：0.00MiB・0行');
+  await expect(copy).toContainText('保存音声：0.00MiB・0行');
+  await expect(copy).toContainText('使用中');
+  await expect(projects.getByRole('status').filter({ hasText: '導入シナリオ' })).toContainText(
+    '2行を削除しました',
+  );
+});
 test('aborts a failed cache update atomically and retains the old WAVs as well as current live previews', async ({
   page,
 }) => {
