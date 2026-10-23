@@ -27,7 +27,13 @@ type Entry = {
   audition: LibraryAudition;
   storedAt: string;
 };
-type Size = { id: string; projectId: string; bytes: number };
+export type SavedAudioItem = {
+  id: string;
+  lineId: string;
+  bytes: number;
+  revision?: string;
+};
+type Size = { id: string; projectId: string; bytes: number; revision?: string };
 export type AudioSave = { line: ScriptLine; blob: Blob; audition: LibraryAudition };
 async function openDatabase() {
   if (typeof indexedDB === 'undefined')
@@ -73,7 +79,9 @@ async function readSavedAudioSizes() {
             (item) =>
               !Number.isSafeInteger(item.bytes) ||
               item.bytes < 0 ||
-              typeof item.projectId !== 'string',
+              typeof item.projectId !== 'string' ||
+              typeof item.id !== 'string' ||
+              (item.revision !== undefined && typeof item.revision !== 'string'),
           )
         ) {
           reject(new Error('保存音声の容量情報を確認できません。'));
@@ -100,6 +108,26 @@ export async function readSavedAudioByProject() {
     usage.set(item.projectId, { bytes: current.bytes + item.bytes, entries: current.entries + 1 });
   }
   return usage;
+}
+export async function readProjectAudioItems(projectId: string): Promise<SavedAudioItem[]> {
+  z.uuid().parse(projectId);
+  const sizes = await readSavedAudioSizes();
+  return sizes
+    .filter((item) => item.projectId === projectId)
+    .map((item) => {
+      let lineId: string;
+      try {
+        const key = JSON.parse(item.id) as unknown;
+        if (!Array.isArray(key) || key.length !== 2 || key[0] !== projectId)
+          throw new Error('invalid key');
+        lineId = z.uuid().parse(key[1]);
+      } catch {
+        // Legacy or damaged metadata remains removable without loading the WAV.
+        lineId = '';
+      }
+      return { id: item.id, lineId, bytes: item.bytes, revision: item.revision };
+    })
+    .sort((a, b) => a.id.localeCompare(b.id));
 }
 export async function saveScriptAudio(projectId: string, sources: AudioSave[]) {
   return saveAudio(projectId, sources, 20);
@@ -144,7 +172,13 @@ async function saveAudio(projectId: string, sources: AudioSave[], limit: number)
         try {
           const replaced = new Set(entries.map((e) => e.id));
           const sizes: Size[] = (request.result as Size[]).filter((s) => !replaced.has(s.id));
-          sizes.push(...entries.map((e) => ({ id: e.id, projectId, bytes: e.blob.size })));
+          const nextSizes = entries.map((e) => ({
+            id: e.id,
+            projectId,
+            bytes: e.blob.size,
+            revision: crypto.randomUUID(),
+          }));
+          sizes.push(...nextSizes);
           if (
             sizes.length > maxSavedAudioEntries ||
             sizes.some((s) => !Number.isSafeInteger(s.bytes) || s.bytes < 0) ||
@@ -155,9 +189,62 @@ async function saveAudio(projectId: string, sources: AudioSave[], limit: number)
             throw new Error(
               '保存音声の容量上限です。この作品は64MiB、全作品で128MiB・1000行までです。不要な保存音声を削除してください。',
             );
-          for (const entry of entries) {
+          for (const [index, entry] of entries.entries()) {
             tx.objectStore('audio').put(entry);
-            tx.objectStore('sizes').put({ id: entry.id, projectId, bytes: entry.blob.size });
+            tx.objectStore('sizes').put(nextSizes[index]);
+          }
+        } catch (cause) {
+          failure = cause;
+          tx.abort();
+        }
+      };
+    });
+  } finally {
+    db.close();
+  }
+  notifySavedAudioChanged();
+}
+export async function deleteSelectedProjectAudio(
+  projectId: string,
+  expected: SavedAudioItem[],
+  selectedIds: string[],
+) {
+  z.uuid().parse(projectId);
+  const selected = new Set(selectedIds);
+  if (
+    !selected.size ||
+    selected.size !== selectedIds.length ||
+    selectedIds.some((id) => !expected.some((item) => item.id === id))
+  )
+    throw new Error('削除する保存音声を選択してください。');
+  const db = await openDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(['audio', 'sizes'], 'readwrite');
+      let failure: unknown;
+      tx.oncomplete = () => resolve();
+      tx.onabort = () => reject(failure ?? tx.error);
+      tx.onerror = () => {
+        failure ??= tx.error;
+      };
+      const request = tx
+        .objectStore('sizes')
+        .index('projectId')
+        .getAll(IDBKeyRange.only(projectId));
+      request.onsuccess = () => {
+        try {
+          const actual = request.result as Size[];
+          if (
+            actual.length !== expected.length ||
+            actual.some((item) => {
+              const old = expected.find((candidate) => candidate.id === item.id);
+              return !old || old.bytes !== item.bytes || old.revision !== item.revision;
+            })
+          )
+            throw new SavedAudioChangedError();
+          for (const id of selected) {
+            tx.objectStore('audio').delete(id);
+            tx.objectStore('sizes').delete(id);
           }
         } catch (cause) {
           failure = cause;

@@ -8,11 +8,42 @@ import {
   type VoiceProject,
 } from '../../shared/project';
 import { savedAudioChangedEvent } from '../lib/script-audio-events';
+import type { SavedAudioItem } from '../lib/script-audio-store';
 import { useProject } from '../lib/project-context';
 
 type AudioUsage = { bytes: number; entries: number };
 type AudioDeletion = AudioUsage & { id: string; name: string };
+type AudioSelection = {
+  projectId: string;
+  name: string;
+  items: SavedAudioItem[];
+  selected: string[];
+  confirming: boolean;
+};
 const formatMiB = (bytes: number) => (bytes / 1024 ** 2).toFixed(2);
+const formatAudioSize = (bytes: number) =>
+  bytes < 0.01 * 1024 ** 2 ? `${(bytes / 1024).toFixed(1)}KiB` : `${formatMiB(bytes)}MiB`;
+function describeAudio(project: VoiceProject, lineId: string) {
+  const scripts = [
+    ...(project.documents.script
+      ? [
+          {
+            script: project.documents.script,
+            label: `編集中の台本「${project.documents.script.title || '無題'}」`,
+          },
+        ]
+      : []),
+    ...project.documents.scriptLibrary.entries.map((entry) => ({
+      script: entry.script,
+      label: `保存台本「${entry.script.title}」`,
+    })),
+  ];
+  for (const { script, label } of scripts) {
+    const index = script.lines.findIndex((line) => line.id === lineId);
+    if (index >= 0) return `${label}・第${index + 1}行：${script.lines[index].text || '（空欄）'}`;
+  }
+  return `台本内の対応行なし（古い保存音声）・行ID ${lineId || '不明'}`;
+}
 
 export function ProjectLibrary({
   disabled,
@@ -38,6 +69,7 @@ export function ProjectLibrary({
   > | null>(null);
   const [audioError, setAudioError] = useState(false);
   const [audioDeletion, setAudioDeletion] = useState<AudioDeletion | null>(null);
+  const [audioSelection, setAudioSelection] = useState<AudioSelection | null>(null);
   const [deletingAudio, setDeletingAudio] = useState(false);
   const [deleteError, setDeleteError] = useState('');
   const [deleteNotice, setDeleteNotice] = useState('');
@@ -150,6 +182,99 @@ export function ProjectLibrary({
       setDeletingAudio(false);
     }
   }
+  async function openAudioSelection(project: VoiceProject) {
+    if (locked) return;
+    setDeleteError('');
+    setDeleteNotice('');
+    try {
+      const { readProjectAudioItems } = await import('../lib/script-audio-store');
+      const items = await readProjectAudioItems(project.id);
+      const fresh = readProjectLibrary(localStorage).projects.find(
+        (item) => item.id === project.id,
+      );
+      if (!fresh || fresh.name !== project.name)
+        throw new Error('作品が変わりました。内容を確認してから開き直してください。');
+      setAudioDeletion(null);
+      setAudioSelection({
+        projectId: project.id,
+        name: project.name,
+        items,
+        selected: [],
+        confirming: false,
+      });
+    } catch (cause) {
+      setDeleteError(
+        cause instanceof Error ? cause.message : '保存音声の一覧を読み込めませんでした。',
+      );
+    }
+  }
+  async function confirmSelectedDeletion() {
+    const current = audioSelection;
+    if (!current?.confirming || locked) return;
+    setDeletingAudio(true);
+    setDeleteError('');
+    setDeleteNotice('');
+    try {
+      ensureIdle();
+      const project = readProjectLibrary(localStorage).projects.find(
+        (item) => item.id === current.projectId,
+      );
+      const { readProjectAudioItems, deleteSelectedProjectAudio, SavedAudioChangedError } =
+        await import('../lib/script-audio-store');
+      const fresh = await readProjectAudioItems(current.projectId);
+      if (
+        !project ||
+        project.name !== current.name ||
+        JSON.stringify(fresh) !== JSON.stringify(current.items)
+      ) {
+        setAudioSelection(
+          project
+            ? {
+                projectId: project.id,
+                name: project.name,
+                items: fresh,
+                selected: [],
+                confirming: false,
+              }
+            : null,
+        );
+        setDeleteNotice('作品または保存音声が変わりました。対象を選び直してください。');
+        return;
+      }
+      try {
+        await deleteSelectedProjectAudio(current.projectId, current.items, current.selected);
+      } catch (cause) {
+        if (!(cause instanceof SavedAudioChangedError)) throw cause;
+        setAudioSelection({
+          projectId: project.id,
+          name: project.name,
+          items: await readProjectAudioItems(project.id),
+          selected: [],
+          confirming: false,
+        });
+        setDeleteNotice('保存音声が変わりました。対象を選び直してください。');
+        return;
+      }
+      const removed = current.selected.length;
+      setAudioSelection({
+        ...current,
+        items: current.items.filter((item) => !current.selected.includes(item.id)),
+        selected: [],
+        confirming: false,
+      });
+      setDeleteNotice(
+        `「${project.name}」の保存音声${removed}行を削除しました。作品と編集中の試聴音声は保持しています。`,
+      );
+    } catch (cause) {
+      setDeleteError(
+        cause instanceof Error && cause.message.length < 200
+          ? cause.message
+          : '選択した保存音声を削除できませんでした。',
+      );
+    } finally {
+      setDeletingAudio(false);
+    }
+  }
   return (
     <section aria-label="作品ライブラリ" className="library-comparison">
       <h3>作品ライブラリ</h3>
@@ -249,13 +374,105 @@ export function ProjectLibrary({
                     const usage = audioByProject?.get(project.id);
                     if (!usage?.entries) return;
                     setAudioDeletion({ id: project.id, name: project.name, ...usage });
+                    setAudioSelection(null);
                     setDeleteError('');
                     setDeleteNotice('');
                   }}
                 >
                   保存音声を削除
                 </button>
+                <button
+                  className="secondary-button"
+                  disabled={locked || !audioByProject?.get(project.id)?.entries}
+                  onClick={() => void openAudioSelection(project)}
+                >
+                  保存音声を選んで削除
+                </button>
               </div>
+              {audioSelection?.projectId === project.id && (
+                <div role="group" aria-label="保存音声の選択削除">
+                  <p>
+                    保存音声{audioSelection.items.length}
+                    行。台本との対応は行IDから表示します。保存時の読み上げ条件と現在の台本が一致するとは限りません。
+                  </p>
+                  <ol>
+                    {audioSelection.items.map((item) => (
+                      <li key={item.id}>
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={audioSelection.selected.includes(item.id)}
+                            disabled={locked}
+                            onChange={(event) =>
+                              setAudioSelection(
+                                (old) =>
+                                  old && {
+                                    ...old,
+                                    selected: event.target.checked
+                                      ? [...old.selected, item.id]
+                                      : old.selected.filter((id) => id !== item.id),
+                                    confirming: false,
+                                  },
+                              )
+                            }
+                          />
+                          {describeAudio(project, item.lineId)}・{formatAudioSize(item.bytes)}
+                        </label>
+                      </li>
+                    ))}
+                  </ol>
+                  <p>
+                    選択：{audioSelection.selected.length}行・
+                    {formatAudioSize(
+                      audioSelection.items
+                        .filter((item) => audioSelection.selected.includes(item.id))
+                        .reduce((sum, item) => sum + item.bytes, 0),
+                    )}
+                    を解放する見込みです。
+                  </p>
+                  {audioSelection.confirming ? (
+                    <div role="group" aria-label="選択した保存音声の削除確認">
+                      <p>
+                        選択した{audioSelection.selected.length}
+                        行の保存音声を削除します。作品の設定・台本と編集中の試聴音声は保持します。
+                      </p>
+                      <button
+                        className="secondary-button"
+                        disabled={locked}
+                        onClick={() => void confirmSelectedDeletion()}
+                      >
+                        確認した選択音声を削除
+                      </button>
+                      <button
+                        className="text-button"
+                        disabled={locked}
+                        onClick={() =>
+                          setAudioSelection((old) => old && { ...old, confirming: false })
+                        }
+                      >
+                        削除をキャンセル
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      className="text-button"
+                      disabled={locked || !audioSelection.selected.length}
+                      onClick={() =>
+                        setAudioSelection((old) => old && { ...old, confirming: true })
+                      }
+                    >
+                      選択した音声を削除
+                    </button>
+                  )}
+                  <button
+                    className="text-button"
+                    disabled={locked}
+                    onClick={() => setAudioSelection(null)}
+                  >
+                    音声一覧を閉じる
+                  </button>
+                </div>
+              )}
               {audioDeletion?.id === project.id && (
                 <div role="group" aria-label="作品の保存音声の削除確認">
                   <p>
