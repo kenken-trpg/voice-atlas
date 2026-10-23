@@ -285,6 +285,62 @@ test('deletes saved audio for an inactive project without changing the active pr
     '2行を削除しました',
   );
 });
+test('selectively deletes one saved line and rejects changed audio before confirmation', async ({
+  page,
+}) => {
+  const { panel, calls } = await setup(page);
+  await panel.getByRole('button', { name: '未生成の行を台本順に生成', exact: true }).click();
+  const projects = await saveProject(page);
+  const cache = await openCache(panel);
+  await cache.getByRole('button', { name: '台本音声をブラウザに保存', exact: true }).click();
+  const project = projects.getByRole('listitem', { name: '保存作品 導入シナリオ', exact: true });
+  await project.getByRole('button', { name: '保存音声を選んで削除' }).click();
+  const selection = project.getByRole('group', { name: '保存音声の選択削除' });
+  await expect(selection.locator('input[type="checkbox"]')).toHaveCount(2);
+  await expect(selection).toContainText('編集中の台本「導入の会話」・第1行');
+  await selection.locator('input[type="checkbox"]').first().check();
+  await expect(selection).toContainText('選択：1行');
+  await selection.getByRole('button', { name: '選択した音声を削除' }).click();
+  await page.evaluate(
+    (projectId) =>
+      new Promise<void>((resolve, reject) => {
+        const request = indexedDB.open('voice-atlas-script-audio-v1', 1);
+        request.onsuccess = () => {
+          const db = request.result;
+          const tx = db.transaction('sizes', 'readwrite');
+          const store = tx.objectStore('sizes');
+          const read = store.index('projectId').getAll(IDBKeyRange.only(projectId));
+          read.onsuccess = () => store.put({ ...read.result[0], revision: crypto.randomUUID() });
+          tx.oncomplete = () => {
+            db.close();
+            resolve();
+          };
+          tx.onabort = () => {
+            db.close();
+            reject(tx.error);
+          };
+        };
+        request.onerror = () => reject(request.error);
+      }),
+    fixture.id,
+  );
+  await selection.getByRole('button', { name: '確認した選択音声を削除' }).click();
+  await expect(
+    projects.getByRole('status').filter({ hasText: '対象を選び直してください' }),
+  ).toBeVisible();
+  await expect(selection.locator('input[type="checkbox"]:checked')).toHaveCount(0);
+  await expect(project).toContainText('保存音声：0.01MiB・2行');
+  await selection.locator('input[type="checkbox"]').first().check();
+  await selection.getByRole('button', { name: '選択した音声を削除' }).click();
+  await selection.getByRole('button', { name: '確認した選択音声を削除' }).click();
+  await expect(project).toContainText('保存音声：0.00MiB・1行');
+  await expect(selection.locator('input[type="checkbox"]')).toHaveCount(1);
+  await expect(panel.locator(':scope > ol audio')).toHaveCount(2);
+  await page.reload();
+  await expand(page);
+  await expect(panel.locator(':scope > ol audio')).toHaveCount(1);
+  expect(calls()).toBe(2);
+});
 test('aborts a failed cache update atomically and retains the old WAVs as well as current live previews', async ({
   page,
 }) => {
