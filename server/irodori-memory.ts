@@ -1,6 +1,7 @@
 import { readFile, stat } from 'node:fs/promises';
 import { arch, platform, totalmem } from 'node:os';
 import { join, resolve } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import type { IrodoriEvaluationConfig } from '../shared/irodori-evaluation';
 
 type Memory = {
@@ -8,20 +9,114 @@ type Memory = {
   mpsDriverAllocatedBytes?: number | null;
   cudaPeakAllocatedBytes?: number | null;
 };
-type Sample = { elapsedMs?: number; durationSeconds?: number; memory?: Memory };
+type SampleCondition = {
+  id: string;
+  condition: number;
+  sentenceId: string;
+  text: string;
+  caption: string | null;
+  seed: number;
+  steps: number;
+  repeatOf: string | null;
+};
+type Sample = Partial<SampleCondition> & {
+  elapsedMs?: number;
+  durationSeconds?: number;
+  memory?: Memory;
+};
 type Run = {
   format: string;
   version: number;
   status: string;
-  plan: { config: IrodoriEvaluationConfig };
+  plan: {
+    config: IrodoriEvaluationConfig;
+    samples?: SampleCondition[];
+    runtime?: Record<string, unknown>;
+    sampling?: Record<string, unknown>;
+  };
   machine?: { platform?: string; arch?: string };
-  assets?: { checkpoint?: { sha256?: string } };
+  assets?: {
+    checkpoint?: { sha256?: string };
+    codec?: { sha256?: string };
+    reference?: { sha256?: string };
+  };
+  source?: { runtimeSha256?: string };
   afterLoadMemory?: Memory;
   samples: Sample[];
 };
 
 function finite(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+const conditionFields = [
+  'id',
+  'condition',
+  'sentenceId',
+  'text',
+  'caption',
+  'seed',
+  'steps',
+  'repeatOf',
+] as const;
+function matchesPlan(run: Run) {
+  return (
+    Array.isArray(run.plan.samples) &&
+    run.samples.length <= run.plan.samples.length &&
+    (run.status !== 'completed' || run.samples.length === run.plan.samples.length) &&
+    run.samples.every((sample, index) =>
+      conditionFields.every((field) => {
+        const planned = run.plan.samples?.[index];
+        return Boolean(
+          planned &&
+          Object.hasOwn(sample, field) &&
+          Object.hasOwn(planned, field) &&
+          isDeepStrictEqual(sample[field], planned[field]),
+        );
+      }),
+    )
+  );
+}
+function sequence(run: Run, field: keyof SampleCondition) {
+  return run.samples.map((sample) => sample[field]);
+}
+function sameRecordedAsset(first: Run, current: Run, asset: 'codec' | 'reference') {
+  const before = first.assets?.[asset]?.sha256;
+  return Boolean(
+    before && /^[0-9a-f]{64}$/.test(before) && before === current.assets?.[asset]?.sha256,
+  );
+}
+function conditionReasons(first: Run, current: Run) {
+  const reasons: string[] = [];
+  if (!matchesPlan(first) || !matchesPlan(current))
+    reasons.push('生成済み音声と生成プランの条件が一致しないか記録が不足している');
+  if (first.samples.length !== current.samples.length) reasons.push('生成済み音声の件数が異なる');
+  if (first.samples.length === current.samples.length) {
+    for (const [field, label] of [
+      ['text', '文章'],
+      ['sentenceId', '文章ID'],
+      ['caption', 'caption'],
+      ['seed', 'seed'],
+      ['steps', '生成ステップ'],
+      ['repeatOf', '再生成の対応'],
+      ['id', '音声の順序'],
+      ['condition', '声の条件順序'],
+    ] as const) {
+      if (!isDeepStrictEqual(sequence(first, field), sequence(current, field)))
+        reasons.push(`${label}が異なる`);
+    }
+  }
+  if (!isDeepStrictEqual(first.plan.runtime, current.plan.runtime) || !first.plan.runtime)
+    reasons.push('モデル実行設定が異なるか未確認');
+  if (!isDeepStrictEqual(first.plan.sampling, current.plan.sampling) || !first.plan.sampling)
+    reasons.push('生成設定が異なるか未確認');
+  if (!sameRecordedAsset(first, current, 'codec')) reasons.push('codecが異なるか未確認');
+  if (first.plan.config.mode === 'reference' && !sameRecordedAsset(first, current, 'reference'))
+    reasons.push('参照音声が異なるか未確認');
+  const runtime = first.source?.runtimeSha256;
+  if (!runtime || !/^[0-9a-f]{64}$/.test(runtime) || runtime !== current.source?.runtimeSha256)
+    reasons.push('Irodori runtimeが異なるか未確認');
+  return reasons;
 }
 function max(values: (number | null)[]): number | null {
   const present = values.filter((value): value is number => value !== null);
@@ -88,7 +183,7 @@ export async function memoryReport(paths: string[]) {
   const runs = await Promise.all(paths.map(readIrodoriRun));
   const summaries = runs.map(({ directory, run }) => summarizeRun(directory, run));
   const first = summaries[0];
-  const comparisons = summaries.slice(1).map((current) => {
+  const comparisons = summaries.slice(1).map((current, index) => {
     const reasons: string[] = [];
     if (current.mode !== first.mode || current.device !== first.device)
       reasons.push('mode/deviceが異なる');
@@ -103,6 +198,7 @@ export async function memoryReport(paths: string[]) {
       reasons.push('生成枠の秒数が異なる');
     if (current.status !== 'completed' || first.status !== 'completed')
       reasons.push('未完了のランが含まれる');
+    reasons.push(...conditionReasons(runs[0].run, runs[index + 1].run));
     return {
       baseline: first.directory,
       current: current.directory,
@@ -136,7 +232,7 @@ export async function memoryReport(paths: string[]) {
     host: { platform: platform(), arch: arch(), physicalMemoryBytes: totalmem() },
     runs: summaries,
     comparisons,
-    note: 'MPSは生成直後の観測値でピークではありません。RSSとMPSは重複し得るため合算しません。CUDAはtorch割り当てピークです。異なるモデル・端末・生成枠の値は直接比較できません。',
+    note: 'MPSは生成直後の観測値でピークではありません。RSSとMPSは重複し得るため合算しません。CUDAはtorch割り当てピークです。差分は記録済み音声の順序・文章・caption・seed・step・モデル/codec/参照音声・生成設定・端末・生成枠が一致する完了ランに限ります。',
   };
 }
 

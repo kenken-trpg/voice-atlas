@@ -721,6 +721,88 @@ describe('Irodori subprocess contract (synthetic runtime only)', () => {
       'device/mode',
     );
   });
+  it('shows no performance difference when recorded generation conditions change', async () => {
+    const f = await fixture();
+    expect((await f.run()).code).toBe(0);
+    const original = await f.manifest();
+    const other = join(f.dir, 'changed-run');
+    await mkdir(other);
+    await writeFile(join(other, 'manifest.json'), JSON.stringify(original));
+    expect((await memoryReport([f.output, other])).comparisons[0].comparable).toBe(true);
+    const changes: [string, (manifest: typeof original) => void][] = [
+      [
+        '文章',
+        (manifest) => {
+          manifest.plan.samples[0].text = '別の文章';
+          manifest.samples[0].text = '別の文章';
+        },
+      ],
+      [
+        'caption',
+        (manifest) => {
+          manifest.plan.samples[0].caption = '別の声';
+          manifest.samples[0].caption = '別の声';
+        },
+      ],
+      [
+        'seed',
+        (manifest) => {
+          manifest.plan.samples[0].seed = 123;
+          manifest.samples[0].seed = 123;
+        },
+      ],
+      [
+        '生成ステップ',
+        (manifest) => {
+          manifest.plan.samples[0].steps = 40;
+          manifest.samples[0].steps = 40;
+        },
+      ],
+      [
+        '生成設定',
+        (manifest) => {
+          manifest.plan.sampling.seconds = 9;
+        },
+      ],
+      [
+        'codec',
+        (manifest) => {
+          manifest.assets.codec.sha256 = 'a'.repeat(64);
+        },
+      ],
+      [
+        '生成済み音声と生成プラン',
+        (manifest) => {
+          manifest.samples[0].text = '記録だけ変更';
+        },
+      ],
+    ];
+    for (const [reason, change] of changes) {
+      const changed = structuredClone(original);
+      change(changed);
+      await writeFile(join(other, 'manifest.json'), JSON.stringify(changed));
+      const comparison = (await memoryReport([f.output, other])).comparisons[0];
+      expect(comparison.comparable, reason).toBe(false);
+      expect(comparison.reasons.join(' '), reason).toContain(reason);
+      expect(comparison.medianGenerationMsDifference).toBeNull();
+      expect(comparison.maxObservedProcessRssBytesDifference).toBeNull();
+    }
+  });
+  it('requires the same reference audio in reference mode', async () => {
+    const f = await fixture('reference');
+    expect((await f.run()).code).toBe(0);
+    const other = join(f.dir, 'changed-reference');
+    await mkdir(other);
+    const manifest = await f.manifest();
+    manifest.assets.reference.sha256 = 'b'.repeat(64);
+    await writeFile(join(other, 'manifest.json'), JSON.stringify(manifest));
+    const comparison = (await memoryReport([f.output, other])).comparisons[0];
+    expect(comparison).toMatchObject({
+      comparable: false,
+      medianGenerationMsDifference: null,
+      reasons: [expect.stringContaining('参照音声')],
+    });
+  });
   it('prints baseline warnings before a read-only preflight without changing the saved run', async () => {
     const f = await fixture();
     expect((await f.run()).code).toBe(0);
