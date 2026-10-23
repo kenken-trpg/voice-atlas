@@ -9,6 +9,7 @@ const common = {
   checkpoint: path,
   codecPath: path,
   device: z.enum(['cpu', 'mps', 'cuda']),
+  seconds: z.number().min(1).max(30).default(30),
   seeds: z
     .array(
       z
@@ -101,7 +102,7 @@ export function makeIrodoriPlan(raw: unknown) {
       compile_dynamic: false,
     },
     sampling: {
-      seconds: 30,
+      seconds: config.seconds,
       num_candidates: 1,
       decode_mode: 'sequential',
       max_ref_seconds: 30,

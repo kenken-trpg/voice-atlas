@@ -204,6 +204,8 @@ describe('Irodori spike plans', () => {
       expect({ ...sample, id: original.id, repeatOf: null }).toEqual(original);
     }
     expect(plan.sampling).toMatchObject({ cfg_scale_caption: 3, cfg_scale_speaker: 0 });
+    expect(plan.sampling.seconds).toBe(30);
+    expect(makeIrodoriPlan({ ...config, seconds: 10 }).sampling.seconds).toBe(10);
   });
   it('keeps caption design and reference conditioning separate and bounds the matrix before generation', () => {
     const { captions: _captions, ...common } = config;
@@ -219,6 +221,8 @@ describe('Irodori spike plans', () => {
       { ...config, seeds: [17] },
       { ...config, seeds: [-1, 29] },
       { ...config, steps: [0] },
+      { ...config, seconds: 0 },
+      { ...config, seconds: 31 },
       { ...config, captions: [' '] },
       { ...config, sentenceIds: ['unknown'] },
       { ...config, version: 2 },
