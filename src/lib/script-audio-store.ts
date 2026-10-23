@@ -3,6 +3,7 @@ import { scriptAudioKey, type ScriptLine } from '../../shared/script';
 import { type LibraryAudition } from '../../shared/library-comparison';
 import {
   maxSavedAudioBytes,
+  maxSavedAudioEntries,
   maxArchiveAudioEntries,
   maxProjectAudioBytes,
   validateSavedAudioBlob as validBlob,
@@ -49,6 +50,30 @@ async function openDatabase() {
   });
 }
 const entryId = (projectId: string, lineId: string) => JSON.stringify([projectId, lineId]);
+export async function readSavedAudioUsage() {
+  const db = await openDatabase();
+  try {
+    return await new Promise<{ bytes: number; entries: number }>((resolve, reject) => {
+      const tx = db.transaction('sizes', 'readonly');
+      const request = tx.objectStore('sizes').getAll();
+      tx.oncomplete = () => {
+        const sizes = request.result as Size[];
+        if (
+          !Array.isArray(sizes) ||
+          sizes.some((item) => !Number.isSafeInteger(item.bytes) || item.bytes < 0)
+        ) {
+          reject(new Error('保存音声の容量情報を確認できません。'));
+          return;
+        }
+        resolve({ bytes: sizes.reduce((sum, item) => sum + item.bytes, 0), entries: sizes.length });
+      };
+      tx.onabort = () => reject(tx.error);
+      tx.onerror = () => reject(tx.error);
+    });
+  } finally {
+    db.close();
+  }
+}
 export async function saveScriptAudio(projectId: string, sources: AudioSave[]) {
   return saveAudio(projectId, sources, 20);
 }
@@ -94,7 +119,7 @@ async function saveAudio(projectId: string, sources: AudioSave[], limit: number)
           const sizes: Size[] = (request.result as Size[]).filter((s) => !replaced.has(s.id));
           sizes.push(...entries.map((e) => ({ id: e.id, projectId, bytes: e.blob.size })));
           if (
-            sizes.length > 1000 ||
+            sizes.length > maxSavedAudioEntries ||
             sizes.some((s) => !Number.isSafeInteger(s.bytes) || s.bytes < 0) ||
             sizes.reduce((n, s) => n + s.bytes, 0) > maxSavedAudioBytes ||
             sizes.filter((s) => s.projectId === projectId).reduce((n, s) => n + s.bytes, 0) >

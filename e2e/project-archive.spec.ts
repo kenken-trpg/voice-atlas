@@ -212,6 +212,61 @@ test('exports saved WAVs and restores into a clean offline browser without gener
   }
 });
 
+test('shows projected archive capacity and rechecks it before restore', async ({ page }) => {
+  const { archive } = await open(page, fixture());
+  await inspect(page, await archiveFile());
+  const confirmation = archive.getByRole('group', { name: '音声付き作品の復元確認' });
+  await expect(confirmation).toContainText('このブラウザの保存音声：現在0.00MiB・0行');
+  const putUsage = (bytes: number | null) =>
+    page.evaluate(async (bytes) => {
+      await new Promise<void>((resolve, reject) => {
+        const request = indexedDB.open('voice-atlas-script-audio-v1', 1);
+        request.onsuccess = () => {
+          const db = request.result;
+          const tx = db.transaction('sizes', 'readwrite');
+          if (bytes === null) tx.objectStore('sizes').delete('synthetic-other-project');
+          else
+            tx.objectStore('sizes').put({
+              id: 'synthetic-other-project',
+              projectId: crypto.randomUUID(),
+              bytes,
+            });
+          tx.oncomplete = () => {
+            db.close();
+            resolve();
+          };
+          tx.onabort = () => {
+            db.close();
+            reject(tx.error);
+          };
+        };
+        request.onerror = () => reject(request.error);
+      });
+    }, bytes);
+  const confirm = confirmation.getByRole('button', { name: '確認した音声付き作品を復元' });
+  await putUsage(128 * 1024 ** 2);
+  await confirmation.getByRole('button', { name: '保存容量を再確認' }).click();
+  await expect(confirmation).toContainText('復元後の見込み128.00MiB');
+  await expect(confirm).toBeDisabled();
+  await putUsage(null);
+  await confirmation.getByRole('button', { name: '保存容量を再確認' }).click();
+  await expect(confirm).toBeEnabled();
+  await putUsage(128 * 1024 ** 2);
+  await confirm.click();
+  const discard = confirmation.getByRole('button', {
+    name: '未保存の変更を破棄して音声付き作品へ切り替える',
+  });
+  await expect(discard).toBeVisible();
+  await discard.click();
+  await expect(archive.getByRole('alert')).toContainText('128MiB・1000行の上限');
+  await expect(confirm).toBeDisabled();
+  await putUsage(null);
+  await confirmation.getByRole('button', { name: '保存容量を再確認' }).click();
+  await expect(confirm).toBeEnabled();
+  await discard.click();
+  await expect.poll(async () => (await stored(page)).length).toBe(2);
+});
+
 test('includes saved-script audio for an older condition and keeps the original project separate', async ({
   page,
 }) => {

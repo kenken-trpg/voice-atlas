@@ -8,6 +8,10 @@ import {
   type VoiceProject,
 } from '../../shared/project';
 import { type ProjectArchive as Archive } from '../../shared/project-archive';
+import { maxSavedAudioBytes, maxSavedAudioEntries } from '../../shared/script-audio-cache';
+
+type AudioUsage = { bytes: number; entries: number };
+const toMiB = (bytes: number) => (bytes / 1024 ** 2).toFixed(2);
 
 export function ProjectArchive({
   disabled,
@@ -20,6 +24,8 @@ export function ProjectArchive({
 }) {
   const { ensureIdle, transition } = useProject();
   const [pending, setPending] = useState<Archive | null>(null);
+  const [usage, setUsage] = useState<AudioUsage | null>(null);
+  const [usageUnavailable, setUsageUnavailable] = useState(false);
   const [busy, setBusy] = useState(false);
   const [choose, setChoose] = useState(false);
   const [error, setError] = useState('');
@@ -104,6 +110,15 @@ export function ProjectArchive({
         throw new Error('作品アーカイブは100MiB以下にしてください。');
       const archive = await parseProjectArchive(file, request.signal);
       ensureIdle();
+      const { readSavedAudioUsage } = await import('../lib/script-audio-store');
+      try {
+        setUsage(await readSavedAudioUsage());
+        setUsageUnavailable(false);
+      } catch {
+        setUsage(null);
+        setUsageUnavailable(true);
+      }
+      request.signal.throwIfAborted();
       setPending(archive);
       setChoose(false);
     });
@@ -114,6 +129,22 @@ export function ProjectArchive({
     await perform(async (request) => {
       if (readProjectLibrary(localStorage).projects.length >= maxProjectCount)
         throw new Error('作品一覧は20作品までです。不要な作品を整理してから復元してください。');
+      const { readSavedAudioUsage } = await import('../lib/script-audio-store');
+      try {
+        const currentUsage = await readSavedAudioUsage();
+        setUsage(currentUsage);
+        setUsageUnavailable(false);
+        if (
+          currentUsage.bytes + pending.audio.reduce((sum, item) => sum + item.blob.size, 0) >
+            maxSavedAudioBytes ||
+          currentUsage.entries + pending.audio.length > maxSavedAudioEntries
+        )
+          return;
+      } catch {
+        setUsage(null);
+        setUsageUnavailable(true);
+      }
+      request.signal.throwIfAborted();
       const before = signature();
       const current = saveCurrent ? getter.current() : undefined;
       const { restoreProjectArchive } = await import('../lib/project-archive');
@@ -149,8 +180,28 @@ export function ProjectArchive({
   }
   function cancel() {
     setPending(null);
+    setUsage(null);
+    setUsageUnavailable(false);
     setChoose(false);
     setError('');
+  }
+  const incomingBytes = pending?.audio.reduce((sum, item) => sum + item.blob.size, 0) ?? 0;
+  const overLimit =
+    pending !== null &&
+    usage !== null &&
+    (usage.bytes + incomingBytes > maxSavedAudioBytes ||
+      usage.entries + pending.audio.length > maxSavedAudioEntries);
+  function refreshUsage() {
+    void perform(async () => {
+      const { readSavedAudioUsage } = await import('../lib/script-audio-store');
+      try {
+        setUsage(await readSavedAudioUsage());
+        setUsageUnavailable(false);
+      } catch {
+        setUsage(null);
+        setUsageUnavailable(true);
+      }
+    });
   }
   return (
     <section aria-label="音声付き作品アーカイブ" className="project-archive">
@@ -202,10 +253,33 @@ export function ProjectArchive({
           </p>
           <p>
             保存音声{pending.audio.length}行・
-            {(pending.audio.reduce((n, item) => n + item.blob.size, 0) / 1024 ** 2).toFixed(2)}
+            {toMiB(incomingBytes)}
             MiB。音声のない行は、復元後に生成してください。
           </p>
-          <button className="secondary-button" disabled={disabled || busy} onClick={confirm}>
+          {usage && (
+            <p>
+              このブラウザの保存音声：現在{toMiB(usage.bytes)}MiB・{usage.entries}行 →
+              復元後の見込み{toMiB(usage.bytes + incomingBytes)}MiB・
+              {usage.entries + pending.audio.length}行（全作品の上限128MiB・1000行）。
+            </p>
+          )}
+          {usageUnavailable && (
+            <p>保存音声の現在量を確認できません。復元時に容量上限を確認します。</p>
+          )}
+          {overLimit && (
+            <p role="alert">
+              復元後の保存音声が全作品128MiB・1000行の上限を超えます。不要な保存音声を削除してください。
+            </p>
+          )}
+          <p>見込み量はVoice Atlasの保存音声だけです。ブラウザや端末の空き容量は保証しません。</p>
+          <button className="secondary-button" disabled={disabled || busy} onClick={refreshUsage}>
+            保存容量を再確認
+          </button>
+          <button
+            className="secondary-button"
+            disabled={disabled || busy || overLimit}
+            onClick={confirm}
+          >
             確認した音声付き作品を復元
           </button>
           {choose && (

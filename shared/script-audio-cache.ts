@@ -2,6 +2,7 @@ import { scriptCandidate, type ScriptLine } from './script';
 import { libraryAuditionSchema } from './library-comparison';
 
 export const maxSavedAudioBytes = 128 * 1024 * 1024;
+export const maxSavedAudioEntries = 1000;
 export const maxProjectAudioBytes = 64 * 1024 * 1024;
 export const maxEntryAudioBytes = 20 * 1024 * 1024;
 export const maxArchiveAudioEntries = 620;
