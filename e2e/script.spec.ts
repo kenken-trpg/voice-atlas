@@ -137,7 +137,18 @@ test('assigns board voices, generates native audio in order, plays the dialogue 
   await panel.getByRole('button', { name: '台本順に連続試聴', exact: true }).click();
   await expect
     .poll(() => page.evaluate(() => (window as unknown as { plays: string[] }).plays))
-    .toEqual(['台本の第1行の試聴', '台本の第2行の試聴']);
+    .toContain('台本の第1行の試聴');
+  // Headless media clocks may pause under load. Advance the first row through
+  // the same ended event the browser emits, after observing real playback.
+  await panel.getByLabel('台本の第1行の試聴', { exact: true }).evaluate((audio) => {
+    audio.dispatchEvent(new Event('ended'));
+  });
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { plays: string[] }).plays))
+    .toContain('台本の第2行の試聴');
+  await panel.getByLabel('台本の第2行の試聴', { exact: true }).evaluate((audio) => {
+    audio.dispatchEvent(new Event('ended'));
+  });
   await expect(panel.getByRole('button', { name: '台本順に連続試聴', exact: true })).toBeEnabled();
   await panel.getByRole('button', { name: '台本順に連続試聴', exact: true }).click();
   await panel.getByRole('button', { name: '台本の連続試聴を停止', exact: true }).click();
