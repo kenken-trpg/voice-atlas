@@ -192,7 +192,10 @@ export function ProjectPanel() {
   }
   return (
     <details className="project-panel">
-      <summary>作品を保存・復元する</summary>
+      <summary>
+        <span>作品を保存・復元する</span>
+        {saved && <small className="project-active-label">現在の作品：{saved.name}</small>}
+      </summary>
       <section aria-label="作品の保存と復元">
         <h2>声・配役・台本をまとめて保存</h2>
         <ProjectLibrary

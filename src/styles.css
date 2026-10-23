@@ -75,6 +75,11 @@
   cursor: pointer;
   font-weight: 600;
 }
+.project-active-label {
+  margin-left: 12px;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
 .project-panel section,
 .connection-guide section {
   display: grid;
