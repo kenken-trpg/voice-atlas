@@ -7,6 +7,7 @@ import {
   type ProjectLibraryAction,
   type VoiceProject,
 } from '../../shared/project';
+import { savedAudioChangedEvent } from '../lib/script-audio-events';
 
 export function ProjectLibrary({
   disabled,
@@ -23,6 +24,11 @@ export function ProjectLibrary({
   const [editing, setEditing] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [error, setError] = useState('');
+  const [audioByProject, setAudioByProject] = useState<Map<
+    string,
+    { bytes: number; entries: number }
+  > | null>(null);
+  const [audioError, setAudioError] = useState(false);
   useEffect(() => {
     function refresh() {
       try {
@@ -38,11 +44,46 @@ export function ProjectLibrary({
     const timer = setInterval(refresh, 1000);
     return () => clearInterval(timer);
   }, []);
+  useEffect(() => {
+    let disposed = false;
+    let request = 0;
+    async function refreshAudio() {
+      const current = ++request;
+      try {
+        const { readSavedAudioByProject } = await import('../lib/script-audio-store');
+        const usage = await readSavedAudioByProject();
+        if (!disposed && current === request) {
+          setAudioByProject(usage);
+          setAudioError(false);
+        }
+      } catch {
+        if (!disposed && current === request) {
+          setAudioByProject(null);
+          setAudioError(true);
+        }
+      }
+    }
+    void refreshAudio();
+    const onChange = () => void refreshAudio();
+    window.addEventListener(savedAudioChangedEvent, onChange);
+    window.addEventListener('focus', onChange);
+    const timer = setInterval(onChange, 5000);
+    return () => {
+      disposed = true;
+      window.removeEventListener(savedAudioChangedEvent, onChange);
+      window.removeEventListener('focus', onChange);
+      clearInterval(timer);
+    };
+  }, []);
   return (
     <section aria-label="作品ライブラリ" className="library-comparison">
       <h3>作品ライブラリ</h3>
-      <p>最大{maxProjectCount}作品。作品ごとに声・配役・台本を分けて保存します。</p>
+      <p>
+        最大{maxProjectCount}
+        作品。作品ごとに声・配役・台本を分けて保存します。保存音声を整理する場合は、作品を開いて台本音声の保存と再利用から削除できます。
+      </p>
       {error && <p role="alert">{error}</p>}
+      {audioError && <p role="status">保存音声量を確認できません。作品の操作は続けられます。</p>}
       <button
         className="secondary-button"
         disabled={disabled || projects.length >= maxProjectCount}
@@ -73,6 +114,14 @@ export function ProjectLibrary({
                 {active === project.id ? ' · 使用中' : ''}
               </strong>
               <p>{projectSummary(project)}</p>
+              <p>
+                保存音声：
+                {audioByProject
+                  ? `${((audioByProject.get(project.id)?.bytes ?? 0) / 1024 ** 2).toFixed(2)}MiB・${audioByProject.get(project.id)?.entries ?? 0}行`
+                  : audioError
+                    ? '確認できません'
+                    : '確認中…'}
+              </p>
               <p>更新：{new Date(project.updatedAt).toLocaleString('ja-JP')}</p>
               <div className="casting-actions">
                 <button

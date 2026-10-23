@@ -109,12 +109,18 @@ test('persists WAVs and provenance across reload, ignores changed conditions and
   const { panel, calls } = await setup(page);
   await panel.getByRole('button', { name: '未生成の行を台本順に生成', exact: true }).click();
   await expect(panel.locator(':scope > ol audio')).toHaveCount(2);
-  await saveProject(page);
+  const projectPanel = await saveProject(page);
+  const savedProject = projectPanel.getByRole('listitem', {
+    name: '保存作品 導入シナリオ',
+    exact: true,
+  });
+  await expect(savedProject).toContainText('保存音声：0.00MiB・0行');
   let cache = await openCache(panel);
   await cache.getByRole('button', { name: '台本音声をブラウザに保存', exact: true }).click();
   await expect(
     panel.getByRole('status').filter({ hasText: '2行の音声をこのブラウザに保存' }),
   ).toBeVisible();
+  await expect(savedProject).toContainText('保存音声：0.01MiB・2行');
   await page.reload();
   await expand(page);
   await expect(panel.locator(':scope > ol audio')).toHaveCount(2);
@@ -146,6 +152,7 @@ test('persists WAVs and provenance across reload, ignores changed conditions and
   await expect(
     panel.getByRole('status').filter({ hasText: '保存音声を削除しました' }),
   ).toBeVisible();
+  await expect(savedProject).toContainText('保存音声：0.00MiB・0行');
   await expect(panel.locator(':scope > ol audio')).toHaveCount(2);
   await page.reload();
   await expand(page);
@@ -169,12 +176,18 @@ test('does not reuse another project cache when a project is duplicated, and rec
   ).toBeVisible();
   await projects.getByRole('button', { name: '保存済みの作品を複製', exact: true }).click();
   await projects.getByRole('button', { name: '確認した作品を復元', exact: true }).click();
+  await page.getByText('作品を保存・復元する', { exact: true }).click();
+  await expect(
+    projects.getByRole('listitem', { name: '保存作品 導入シナリオ（コピー）' }),
+  ).toContainText('保存音声：0.00MiB・0行');
+  await expect(
+    projects.getByRole('listitem', { name: '保存作品 導入シナリオ', exact: true }),
+  ).toContainText('保存音声：0.01MiB・2行');
   await expand(page);
   await expect(
     panel.getByRole('button', { name: '未生成の行を台本順に生成', exact: true }),
   ).toBeEnabled();
   await expect(panel.locator(':scope > ol audio')).toHaveCount(0);
-  await page.getByText('作品を保存・復元する', { exact: true }).click();
   await projects
     .getByRole('listitem', { name: '保存作品 導入シナリオ', exact: true })
     .getByRole('button', { name: 'この作品を開く', exact: true })

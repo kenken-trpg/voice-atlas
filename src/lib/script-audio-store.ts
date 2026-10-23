@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { savedAudioChangedEvent } from './script-audio-events';
 import { scriptAudioKey, type ScriptLine } from '../../shared/script';
 import { type LibraryAudition } from '../../shared/library-comparison';
 import {
@@ -50,22 +51,30 @@ async function openDatabase() {
   });
 }
 const entryId = (projectId: string, lineId: string) => JSON.stringify([projectId, lineId]);
-export async function readSavedAudioUsage() {
+function notifySavedAudioChanged() {
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event(savedAudioChangedEvent));
+}
+async function readSavedAudioSizes() {
   const db = await openDatabase();
   try {
-    return await new Promise<{ bytes: number; entries: number }>((resolve, reject) => {
+    return await new Promise<Size[]>((resolve, reject) => {
       const tx = db.transaction('sizes', 'readonly');
       const request = tx.objectStore('sizes').getAll();
       tx.oncomplete = () => {
         const sizes = request.result as Size[];
         if (
           !Array.isArray(sizes) ||
-          sizes.some((item) => !Number.isSafeInteger(item.bytes) || item.bytes < 0)
+          sizes.some(
+            (item) =>
+              !Number.isSafeInteger(item.bytes) ||
+              item.bytes < 0 ||
+              typeof item.projectId !== 'string',
+          )
         ) {
           reject(new Error('保存音声の容量情報を確認できません。'));
           return;
         }
-        resolve({ bytes: sizes.reduce((sum, item) => sum + item.bytes, 0), entries: sizes.length });
+        resolve(sizes);
       };
       tx.onabort = () => reject(tx.error);
       tx.onerror = () => reject(tx.error);
@@ -73,6 +82,19 @@ export async function readSavedAudioUsage() {
   } finally {
     db.close();
   }
+}
+export async function readSavedAudioUsage() {
+  const sizes = await readSavedAudioSizes();
+  return { bytes: sizes.reduce((sum, item) => sum + item.bytes, 0), entries: sizes.length };
+}
+export async function readSavedAudioByProject() {
+  const sizes = await readSavedAudioSizes();
+  const usage = new Map<string, { bytes: number; entries: number }>();
+  for (const item of sizes) {
+    const current = usage.get(item.projectId) ?? { bytes: 0, entries: 0 };
+    usage.set(item.projectId, { bytes: current.bytes + item.bytes, entries: current.entries + 1 });
+  }
+  return usage;
 }
 export async function saveScriptAudio(projectId: string, sources: AudioSave[]) {
   return saveAudio(projectId, sources, 20);
@@ -141,6 +163,7 @@ async function saveAudio(projectId: string, sources: AudioSave[], limit: number)
   } finally {
     db.close();
   }
+  notifySavedAudioChanged();
 }
 export async function loadScriptAudio(projectId: string, lines: ScriptLine[]) {
   z.uuid().parse(projectId);
@@ -218,4 +241,5 @@ export async function deleteProjectAudio(projectId: string | null) {
   } finally {
     db.close();
   }
+  notifySavedAudioChanged();
 }
