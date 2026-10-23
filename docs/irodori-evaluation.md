@@ -118,3 +118,12 @@ Hugging FaceとTransformersのオフライン設定を有効にし、Python内�
 5. 読み込み待ち時間、連続生成時のRTF・メモリーと中止後の状態。
 
 同じcaption・seedで十分か、VoiceDesignで作った声を通常モデルの参照音声へ渡す必要があるかを聴取結果で決める。実機を通過した構成を選んでから、製品固有の保存形式・画面・比較・台本へ接続する。
+
+### 保留中の試聴TODO
+
+現在は音声を聴けないため、次の確認を保留する。測定値やWAVのハッシュ一致を聴取結果の代わりにしない。
+
+- [ ] `.local-artifacts/irodori/design-run-3/manifest.json`の条件を確認し、`sample-001.wav`〜`sample-006.wav`を聴く。同じseedの3文で声が保たれるか、seed 17と29でどう変わるか、読み違い・欠落・不自然な間・音割れを記録する。
+- [ ] `design-run-3/sample-001.wav`と`sample-007.wav`（同条件の再生成）を聴く。WAVハッシュは一致済みだが、出力の読み切りと声の用途適合性は別に判断する。
+- [ ] `design-run-3/sample-001.wav`（10秒枠）と`design-run-15/sample-001.wav`（15秒枠）を聴き比べ、末尾切れの有無を記録する。15秒枠の実行全体は未完了なので、この1件だけを比較対象とする。
+- [ ] 結果を[聴取評価の手順](listening-evaluation.md)に従って記録し、VoiceDesignの試験的な採用可否と、通常モデル・参照音声の追加評価が必要かを決める。
