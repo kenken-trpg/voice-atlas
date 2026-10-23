@@ -1,3 +1,5 @@
+import { readWorkspaceDocument, writeWorkspaceDocument } from '../../shared/project';
+import { useProjectPart } from '../lib/project-context';
 import { useRef, useState } from 'react';
 import {
   assignmentEntry,
@@ -43,7 +45,7 @@ export function CastingBoard({
     try {
       return {
         items: parseCastingBoard(
-          localStorage.getItem(castingBoardStorageKey) ??
+          readWorkspaceDocument(castingBoardStorageKey) ??
             '{"format":"voice-atlas-casting-board","version":1,"assignments":[]}',
         ),
         error: '',
@@ -70,6 +72,11 @@ export function CastingBoard({
   const importing = useRef(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const locked = disabled || loading;
+  useProjectPart(
+    'castingBoard',
+    () => ({ format: 'voice-atlas-casting-board', version: 1, assignments: items }),
+    locked,
+  );
   function act(action: () => void) {
     setError('');
     setNotice('');
@@ -85,7 +92,7 @@ export function CastingBoard({
   }
   function persist(next: CastingAssignment[]) {
     const text = serializeCastingBoard(next);
-    localStorage.setItem(castingBoardStorageKey, text);
+    writeWorkspaceDocument(castingBoardStorageKey, text);
     setItems(parseCastingBoard(text));
   }
   function save(item: CastingAssignment) {

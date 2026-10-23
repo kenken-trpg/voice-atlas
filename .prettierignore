@@ -4,5 +4,6 @@ package-lock.json
 coverage/
 test-results/
 playwright-report/
+.local-artifacts/
 .env
 .env.*

@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Irodori 試聴レビュー</title>
+    <style>
+      body {
+        margin: 0 auto;
+        padding: 1.5rem;
+        max-width: 1100px;
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+        color: #1c2933;
+        background: #f5f7fa;
+      }
+      h1,
+      h2 {
+        line-height: 1.2;
+      }
+      .card {
+        background: white;
+        border: 1px solid #d5dfe6;
+        border-radius: 10px;
+        padding: 1rem;
+        margin: 1rem 0;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
+        gap: 1rem;
+      }
+      label {
+        display: block;
+        margin: 0.7rem 0;
+        font-weight: 600;
+      }
+      select,
+      textarea,
+      button {
+        font: inherit;
+      }
+      select,
+      textarea {
+        box-sizing: border-box;
+        width: 100%;
+        padding: 0.45rem;
+        border: 1px solid #8999a8;
+        border-radius: 5px;
+      }
+      textarea {
+        min-height: 5rem;
+      }
+      audio {
+        width: 100%;
+      }
+      button {
+        padding: 0.5rem 0.9rem;
+        cursor: pointer;
+      }
+      .muted {
+        color: #526270;
+      }
+      .error {
+        color: #a22424;
+      }
+      .samples {
+        display: grid;
+        gap: 0.7rem;
+      }
+      .sample {
+        border-top: 1px solid #d5dfe6;
+        padding-top: 0.5rem;
+      }
+      .sample p {
+        margin: 0.35rem 0;
+      }
+      .toolbar {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 0.8rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Irodori 試聴レビュー</h1>
+    <p>
+      保存済みの評価音声を比較し、聴取メモを各ランの
+      <code>review.json</code>
+      に保存します。音声をまだ聴いていない場合は「下書き」を維持してください。
+    </p>
+    <div class="grid" id="comparison"></div>
+    <section id="reviews"></section>
+    <script type="module" src="/irodori-review-ui.js"></script>
+  </body>
+</html>

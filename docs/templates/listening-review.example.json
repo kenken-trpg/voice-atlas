@@ -1,0 +1,25 @@
+{
+  "purpose": "Voice Atlasの手動聴取記録の例。アプリへの取り込み形式ではありません。",
+  "runId": "manifest.jsonの実行ID",
+  "reviewedAt": null,
+  "reviewer": "",
+  "listeningEnvironment": "ヘッドホン・スピーカー、音量調整など",
+  "characterBrief": "",
+  "datasetSplit": "調整用または確認用",
+  "presentationOrder": [],
+  "blindComparison": false,
+  "samples": [
+    {
+      "sentenceId": "greeting",
+      "naturalness1to5": null,
+      "intelligibility1to5": null,
+      "characterFit1to5": null,
+      "pronunciationIssues": [],
+      "audioIssues": [],
+      "adopt": null,
+      "reason": ""
+    }
+  ],
+  "preferredCandidateInTop3": null,
+  "notes": ""
+}

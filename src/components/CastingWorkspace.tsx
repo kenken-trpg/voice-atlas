@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useProject, useProjectPart } from '../lib/project-context';
 import { aivisRecipeSchema } from '../../shared/aivis';
 import {
   castingKey,
@@ -79,6 +80,9 @@ export function CastingWorkspace({
   profile: Profile;
   characterInput: CharacterInput | null;
 }) {
+  const savedWork = useProject().initial?.documents.casting;
+  const savedSession = savedWork?.session;
+  const sessionTimestamp = useRef(savedSession?.createdAt ?? new Date().toISOString());
   const [inventory, setInventory] = useState<CastingInventory | null>(null);
   const [checking, setChecking] = useState(false);
   const [modelInfo, setModelInfo] = useState<AivisModelInfoResponse | null>(null);
@@ -93,16 +97,24 @@ export function CastingWorkspace({
   const [comparisonContext, setComparisonContext] = useState<{
     profile: Profile;
     characterInput: CharacterInput | null;
-  } | null>(null);
+  } | null>(savedSession?.comparisonContext ?? null);
   const [loading, setLoading] = useState(false);
-  const [candidates, setCandidates] = useState<Record<string, CastingCandidate>>({});
-  const [pair, setPair] = useState<[string, string] | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [candidates, setCandidates] = useState<Record<string, CastingCandidate>>(() =>
+    Object.fromEntries(
+      (savedSession?.candidates ?? []).map((item) => [castingKey(item.voice), item]),
+    ),
+  );
+  const [pair, setPair] = useState<[string, string] | null>(savedSession?.comparisonKeys ?? null);
+  const [selected, setSelected] = useState<string | null>(savedSession?.selectedKey ?? null);
   const [singleSlot, setSingleSlot] = useState<0 | 1>(0);
-  const [text, setText] = useState(defaultText);
-  const [evaluations, setEvaluations] = useState<CastingEvaluation[]>([]);
-  const [outcome, setOutcome] = useState<CastingEvaluation['outcome']>('undecided');
-  const [reason, setReason] = useState('');
+  const [text, setText] = useState(savedSession?.text ?? defaultText);
+  const [evaluations, setEvaluations] = useState<CastingEvaluation[]>(
+    savedSession?.evaluations ?? [],
+  );
+  const [outcome, setOutcome] = useState<CastingEvaluation['outcome']>(
+    savedWork?.outcome ?? 'undecided',
+  );
+  const [reason, setReason] = useState(savedWork?.reason ?? '');
   const [audio, setAudio] = useState<Record<string, AudioEntry>>({});
   const audioRef = useRef(audio);
   const requestRef = useRef<AbortController | null>(null);
@@ -331,11 +343,11 @@ export function CastingWorkspace({
     setReason('');
     setNotice('製品・調声値・生成情報と理由を記録しました。比較セッションJSONで保存できます。');
   }
-  function save() {
-    const saved = castingSessionSchema.parse({
+  function sessionSnapshot(createdAt = new Date().toISOString()) {
+    return castingSessionSchema.parse({
       format: 'voice-atlas-casting',
       version: 1,
-      createdAt: new Date().toISOString(),
+      createdAt,
       text,
       candidates: Object.values(candidates).map((candidate) =>
         withModel(candidate, candidate.modelInfo ?? currentModel(candidate)),
@@ -345,7 +357,9 @@ export function CastingWorkspace({
       evaluations,
       comparisonContext: comparisonContext ?? { profile, characterInput },
     });
-    download('voice-atlas-casting.json', JSON.stringify(saved, null, 2));
+  }
+  function save() {
+    download('voice-atlas-casting.json', JSON.stringify(sessionSnapshot(), null, 2));
   }
   async function restore(file?: File) {
     if (!file || generating.current || loading) return;
@@ -354,6 +368,7 @@ export function CastingWorkspace({
       if (file.size > maxCastingSessionFileBytes)
         throw new Error('比較セッションJSONは8MiB以下にしてください。');
       const saved = castingSessionSchema.parse(JSON.parse(await file.text()));
+      sessionTimestamp.current = saved.createdAt;
       refreshId.current++;
       setChecking(false);
       clearAudio();
@@ -404,6 +419,11 @@ export function CastingWorkspace({
     );
   }
   const locked = disabled || busy || loading || libraryComparing;
+  useProjectPart(
+    'casting',
+    () => ({ session: sessionSnapshot(sessionTimestamp.current), outcome, reason }),
+    locked || checking || checkingModels,
+  );
   function loadVoice(entry: VoiceLibraryEntry, slot: 0 | 1) {
     if (locked || generating.current) throw new Error('処理が完了してから読み込んでください。');
     const next = loadLibraryCandidate(candidates, pair, entry, slot);

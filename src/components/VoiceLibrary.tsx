@@ -1,3 +1,5 @@
+import { readWorkspaceDocument, writeWorkspaceDocument } from '../../shared/project';
+import { useProjectPart } from '../lib/project-context';
 import { useEffect, useRef, useState, useImperativeHandle, type Ref } from 'react';
 import {
   libraryStorageKey,
@@ -49,7 +51,7 @@ export function VoiceLibrary({
     try {
       return {
         entries: parseLibrary(
-          localStorage.getItem(libraryStorageKey) ??
+          readWorkspaceDocument(libraryStorageKey) ??
             '{"format":"voice-atlas-voice-library","version":1,"entries":[]}',
         ),
         error: '',
@@ -91,7 +93,7 @@ export function VoiceLibrary({
   }, [draft]);
   function persist(next: VoiceLibraryEntry[]) {
     const text = serializeLibrary(next);
-    localStorage.setItem(libraryStorageKey, text);
+    writeWorkspaceDocument(libraryStorageKey, text);
     setEntries(parseLibrary(text));
     setError('');
   }
@@ -162,6 +164,11 @@ export function VoiceLibrary({
     }
   }
   const locked = disabled || loading;
+  useProjectPart(
+    'voiceLibrary',
+    () => ({ format: 'voice-atlas-voice-library', version: 2, entries }),
+    locked,
+  );
   const registration = editing?.evaluation ?? draft;
   const registeringVoice = registration?.candidates[registration.outcome === 'a' ? 0 : 1].voice;
   const visible = entries.filter(

@@ -44,6 +44,35 @@ export function planScriptRecast(
   );
   if (!character || !targeted.length)
     throw new Error('差し替え対象の発話者と設定を選んでください。');
+  return applyAssignment(parsed, targeted, assignment);
+}
+export function sceneSettingLines(script: VoiceScript, project: string, character: string) {
+  return script.lines.filter(
+    (line) =>
+      scriptCharacter(line) === character &&
+      (!line.assignment || line.assignment.project === project),
+  );
+}
+export function planScriptScene(
+  script: VoiceScript,
+  replacement: CastingAssignment,
+  selectedIds: string[],
+) {
+  const parsed = scriptSchema.parse(script),
+    assignment = castingAssignmentSchema.parse(replacement),
+    ids = new Set(selectedIds);
+  const targeted = sceneSettingLines(parsed, assignment.project, assignment.character).filter(
+    (line) => ids.has(line.id),
+  );
+  if (!ids.size || ids.size !== selectedIds.length || targeted.length !== ids.size)
+    throw new Error('同じ作品・キャラクターの対象行を選び直してください。');
+  return applyAssignment(parsed, targeted, assignment);
+}
+function applyAssignment(
+  parsed: VoiceScript,
+  targeted: ScriptLine[],
+  assignment: CastingAssignment,
+) {
   const ids = new Set(targeted.map((line) => line.id));
   const changedIds: string[] = [],
     audioChangedIds: string[] = [];

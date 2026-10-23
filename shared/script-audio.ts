@@ -1,4 +1,10 @@
-import { parseScript, serializeScript, scriptCandidate, type VoiceScript } from './script';
+import {
+  parseScript,
+  serializeScript,
+  scriptCandidate,
+  scriptSpokenText,
+  type VoiceScript,
+} from './script';
 import { libraryAuditionSchema, type LibraryAudition } from './library-comparison';
 import { joinedSampleRate, checkJoinedFrames } from './wav';
 
@@ -42,6 +48,7 @@ export function makeScriptAudioManifest(script: VoiceScript, inputs: JoinedLine[
     cursor = endFrame + (index < inputs.length - 1 ? gapFrames : 0);
     return {
       lineId: saved.lines[index].id,
+      spokenText: scriptSpokenText(saved.lines[index]),
       startFrame,
       endFrame,
       startMs: (startFrame * 1000) / joinedSampleRate,

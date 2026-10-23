@@ -1,4 +1,6 @@
+import { readWorkspaceDocument, writeWorkspaceDocument } from '../../shared/project';
 import { useEffect, useRef, useState } from 'react';
+import { useProjectPart } from '../lib/project-context';
 import { libraryCandidate, libraryText, type VoiceLibraryEntry } from '../../shared/voice-library';
 import {
   castingCandidateSchema,
@@ -62,7 +64,7 @@ export function LibraryComparison({
 }) {
   const [initial] = useState(() => {
     try {
-      const raw = localStorage.getItem(libraryComparisonStorageKey);
+      const raw = readWorkspaceDocument(libraryComparisonStorageKey);
       return { session: raw ? parseLibraryComparison(raw) : emptySession(), error: '' };
     } catch {
       return {
@@ -73,6 +75,7 @@ export function LibraryComparison({
     }
   });
   const [pair, setPair] = useState(initial.session.entries);
+  const sessionTimestamp = useRef(initial.session.createdAt);
   const [ids, setIds] = useState<[string, string]>(
     (initial.session.entries?.map((e) => e.id) as [string, string]) ?? ['', ''],
   );
@@ -149,7 +152,7 @@ export function LibraryComparison({
     return {
       format: 'voice-atlas-library-comparison',
       version: 1,
-      createdAt: new Date().toISOString(),
+      createdAt: sessionTimestamp.current,
       entries: pair,
       text,
       scene,
@@ -158,6 +161,7 @@ export function LibraryComparison({
       records: nextRecords,
     };
   }
+  useProjectPart('libraryComparison', () => session(), locked);
   function start() {
     act(() => {
       const chosen = ids.map((id) => options.find((entry) => entry.id === id));
@@ -267,7 +271,10 @@ export function LibraryComparison({
         auditions: [audio(pair[0])!.audition, audio(pair[1])!.audition],
       });
       const next = [...records, item];
-      localStorage.setItem(libraryComparisonStorageKey, serializeLibraryComparison(session(next)));
+      writeWorkspaceDocument(
+        libraryComparisonStorageKey,
+        serializeLibraryComparison(session(next)),
+      );
       setRecords(next);
       setPage(0);
       setReason('');
@@ -277,6 +284,7 @@ export function LibraryComparison({
     });
   }
   function restoreSession(saved: LibraryComparisonSession) {
+    sessionTimestamp.current = saved.createdAt;
     clearAudio();
     setPair(saved.entries);
     setIds((saved.entries?.map((e) => e.id) as [string, string]) ?? ['', '']);
@@ -296,7 +304,7 @@ export function LibraryComparison({
     try {
       if (file.size > maxLibraryComparisonBytes) throw new Error('size');
       const saved = parseLibraryComparison(await file.text());
-      localStorage.setItem(libraryComparisonStorageKey, serializeLibraryComparison(saved));
+      writeWorkspaceDocument(libraryComparisonStorageKey, serializeLibraryComparison(saved));
       restoreSession(saved);
       setNotice(
         '設定比較を復元しました。音声は再生成してください。ライブラリの登録は変更しません。',

@@ -15,10 +15,14 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "benchmark:script": "npm run build && playwright test --config=playwright.benchmark.config.ts",
+    "benchmark:archive": "playwright test --config=playwright.archive-benchmark.config.ts",
     "check": "npm test && npm run build",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "probe:aivis": "tsx server/aivis-probe.ts"
+    "probe:aivis": "tsx server/aivis-probe.ts",
+    "evaluate:voice": "tsx server/listening-probe.ts",
+    "evaluate:irodori": "tsx server/irodori-probe.ts"
   },
   "dependencies": {
     "dotenv": "^18.0.8",

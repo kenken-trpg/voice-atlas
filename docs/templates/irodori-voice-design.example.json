@@ -1,0 +1,16 @@
+{
+  "format": "voice-atlas-irodori-config",
+  "version": 1,
+  "mode": "voice-design",
+  "checkpoint": "./models/voice-design/model.safetensors",
+  "codecPath": "./models/codec/weights.pth",
+  "device": "mps",
+  "captions": [
+    "落ち着いた低めの声で、言葉をはっきりと自然に読み上げてください。",
+    "明るく軽やかな声で、親しみを込めて自然に読み上げてください。"
+  ],
+  "seeds": [17, 29],
+  "steps": [20, 40],
+  "sentenceIds": ["greeting", "question", "urgent"],
+  "machineNote": "使用機器と、ほかの重い処理の有無"
+}

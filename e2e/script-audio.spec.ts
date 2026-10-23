@@ -168,17 +168,24 @@ test('cancels preparation and enforces input byte limits while preserving genera
   await panel.getByRole('button', { name: '未生成の行を台本順に生成', exact: true }).click();
   await expect(panel.locator('audio')).toHaveCount(2);
   await page.evaluate(() => {
-    const original = Blob.prototype.arrayBuffer;
-    const state = window as unknown as { releaseJoin: (() => void) | null };
+    const original = window.Worker;
+    const state = window as unknown as {
+      releaseJoin: (() => void) | null;
+      joinTerminated: boolean;
+    };
     state.releaseJoin = null;
-    Blob.prototype.arrayBuffer = async function () {
-      await new Promise<void>((resolve) => {
-        state.releaseJoin = resolve;
-      });
-      return original.call(this);
+    state.joinTerminated = false;
+    window.Worker = class extends original {
+      postMessage(message: unknown) {
+        state.releaseJoin = () => super.postMessage(message);
+      }
+      terminate() {
+        state.joinTerminated = true;
+        super.terminate();
+      }
     };
     (window as unknown as { restoreJoin: () => void }).restoreJoin = () => {
-      Blob.prototype.arrayBuffer = original;
+      window.Worker = original;
       state.releaseJoin?.();
     };
   });
@@ -190,6 +197,11 @@ test('cancels preparation and enforces input byte limits while preserving genera
     .toBe('function');
   await expect(panel.getByLabel('第1行のセリフ', { exact: true })).toBeDisabled();
   await output.getByRole('button', { name: '台本の結合を中止' }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as unknown as { joinTerminated: boolean }).joinTerminated),
+    )
+    .toBe(true);
   await page.evaluate(() => (window as unknown as { restoreJoin: () => void }).restoreJoin());
   await expect(output.getByRole('alert')).toContainText('中止');
   await expect(output.getByRole('link')).toHaveCount(0);
@@ -207,6 +219,87 @@ test('cancels preparation and enforces input byte limits while preserving genera
   await output.getByRole('button', { name: '台本の全行をWAVに結合' }).click();
   await expect(output.getByRole('alert')).toContainText('64MiB');
   await page.evaluate(() => (window as unknown as { restoreSize: () => void }).restoreSize());
+  await output.getByRole('button', { name: '台本の全行をWAVに結合' }).click();
+  await expect(output.getByRole('link', { name: '台本全体のWAVを保存' })).toBeVisible();
+});
+
+test('keeps row audio after worker startup failure and retries with a fresh worker', async ({
+  page,
+}) => {
+  await mockAudio(page);
+  const { panel, output } = await open(page);
+  await panel.getByRole('button', { name: '未生成の行を台本順に生成', exact: true }).click();
+  await expect(panel.locator(':scope > ol audio')).toHaveCount(2);
+  const urls = await panel
+    .locator(':scope > ol audio')
+    .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('src')));
+  await page.evaluate(() => {
+    const original = window.Worker;
+    window.Worker = class extends original {
+      constructor(url: string | URL, options?: WorkerOptions) {
+        super(url, options);
+        queueMicrotask(() => this.dispatchEvent(new ErrorEvent('error', { cancelable: true })));
+      }
+    };
+    (window as unknown as { restoreWorker: () => void }).restoreWorker = () => {
+      window.Worker = original;
+    };
+  });
+  await output.getByRole('button', { name: '台本の全行をWAVに結合' }).click();
+  await expect(output.getByRole('alert')).toContainText('起動・実行できません');
+  expect(
+    await panel
+      .locator(':scope > ol audio')
+      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('src'))),
+  ).toEqual(urls);
+  await page.evaluate(() => (window as unknown as { restoreWorker: () => void }).restoreWorker());
+  await output.getByRole('button', { name: '台本の全行をWAVに結合' }).click();
+  await expect(output.getByRole('link', { name: '台本全体のWAVを保存' })).toBeVisible();
+});
+
+test('terminates the pending join when the script panel closes and preserves row audio on reopening', async ({
+  page,
+}) => {
+  await mockAudio(page);
+  const { panel, output } = await open(page);
+  await panel.getByRole('button', { name: '未生成の行を台本順に生成', exact: true }).click();
+  await expect(panel.locator(':scope > ol audio')).toHaveCount(2);
+  await page.evaluate(() => {
+    const state = window as unknown as {
+      joinPending: boolean;
+      joinTerminated: boolean;
+      restoreWorker: () => void;
+    };
+    const original = window.Worker;
+    state.joinPending = false;
+    state.joinTerminated = false;
+    window.Worker = class extends original {
+      postMessage() {
+        state.joinPending = true;
+      }
+      terminate() {
+        state.joinTerminated = true;
+        super.terminate();
+      }
+    };
+    state.restoreWorker = () => {
+      window.Worker = original;
+    };
+  });
+  await output.getByRole('button', { name: '台本の全行をWAVに結合' }).click();
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { joinPending: boolean }).joinPending))
+    .toBe(true);
+  await page.getByText('台本を作成・試聴する', { exact: true }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as unknown as { joinTerminated: boolean }).joinTerminated),
+    )
+    .toBe(true);
+  await page.getByText('台本を作成・試聴する', { exact: true }).click();
+  await expect(panel.locator(':scope > ol audio')).toHaveCount(2);
+  await expect(output.getByRole('link')).toHaveCount(0);
+  await page.evaluate(() => (window as unknown as { restoreWorker: () => void }).restoreWorker());
   await output.getByRole('button', { name: '台本の全行をWAVに結合' }).click();
   await expect(output.getByRole('link', { name: '台本全体のWAVを保存' })).toBeVisible();
 });

@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import {
+  readWorkspaceDocument,
+  writeWorkspaceDocument,
+  readWorkspaceProject,
+} from '../../shared/project';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useProjectPart } from '../lib/project-context';
 import { type CastingAssignment } from '../../shared/casting-board';
 import {
   emptyScript,
@@ -6,9 +12,11 @@ import {
   maxScriptBytes,
   parseScript,
   scriptAudioKey,
+  scriptSpokenText,
   scriptCandidate,
   scriptStorageKey,
   serializeScript,
+  scriptSchema,
   type ScriptLine,
 } from '../../shared/script';
 import {
@@ -27,7 +35,19 @@ import { AivisModelDetails } from './AivisModelDetails';
 import { ScriptAudioExport } from './ScriptAudioExport';
 import { ScriptLibrary, type ScriptLibraryHandle } from './ScriptLibrary';
 import { ScriptImport } from './ScriptImport';
+import { PronunciationDictionary } from './PronunciationDictionary';
 import { ScriptRecast } from './ScriptRecast';
+import { ScriptSceneSettings } from './ScriptSceneSettings';
+import { ScriptGenerationPanel } from './ScriptGenerationPanel';
+import {
+  startGenerationJob,
+  updateGenerationRow,
+  finishGenerationJob,
+  generationRetryPlan,
+  type ScriptGenerationJob,
+  type ScriptRetryMode,
+} from '../../shared/script-generation';
+import { type ScriptRecastPlan } from '../../shared/script-recast';
 import { makeRecastSnapshot, undoScriptRecast } from '../../shared/script-recast-history';
 import { ScriptRecastHistory, type RecastMemory, type ScriptPreview } from './ScriptRecastHistory';
 
@@ -51,7 +71,7 @@ export function VoiceScript({
 }) {
   const [initial] = useState(() => {
     try {
-      const raw = localStorage.getItem(scriptStorageKey);
+      const raw = readWorkspaceDocument(scriptStorageKey);
       return { script: raw ? parseScript(raw) : emptyScript(), error: '' };
     } catch {
       return {
@@ -66,9 +86,21 @@ export function VoiceScript({
   const [notice, setNotice] = useState('');
   const [opened, setOpened] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [generationJob, setGenerationJob] = useState<ScriptGenerationJob | null>(null);
+  const generationRef = useRef<ScriptGenerationJob | null>(null);
+  const [stopping, setStopping] = useState(false);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [switching, setSwitching] = useState(false);
+  const [cacheBusy, setCacheBusy] = useState(false);
+  const [cacheReady, setCacheReady] = useState(false);
+  const [deleteAudio, setDeleteAudio] = useState<'project' | 'all' | null>(null);
+  const cacheGeneration = useRef(0);
+  const cacheRunning = useRef(false);
+  const scriptRef = useRef(script);
+  useLayoutEffect(() => {
+    scriptRef.current = script;
+  });
   const [recastIds, setRecastIds] = useState<string[]>([]);
   const libraryRef = useRef<ScriptLibraryHandle>(null);
   const [generatingId, setGeneratingId] = useState<string | null>(null);
@@ -85,8 +117,9 @@ export function VoiceScript({
   const audioRefs = useRef(new Map<string, HTMLAudioElement>());
   const queue = useRef<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
-  const baseLocked = disabled || busy || loading || exporting;
+  const baseLocked = disabled || busy || loading || exporting || cacheBusy;
   const locked = baseLocked || switching;
+  useProjectPart('script', () => script, locked);
   function stop() {
     queue.current = [];
     setPlayingId(null);
@@ -95,12 +128,23 @@ export function VoiceScript({
   }
   useEffect(() => {
     if (!active || !opened) {
+      setCacheReady(false);
+      cacheGeneration.current++;
+      if (cacheRunning.current) {
+        cacheRunning.current = false;
+        setCacheBusy(false);
+        onBusyChange(false);
+      }
       controller.current?.abort();
       stop();
     }
   }, [active, opened]);
+  useEffect(() => {
+    if (active && opened && !cacheReady) void restoreAudio(true);
+  }, [active, opened, disabled, busy, loading, exporting, switching, cacheReady, script]);
   useEffect(
     () => () => {
+      cacheGeneration.current++;
       controller.current?.abort();
       audioRefs.current.forEach((audio) => audio.pause());
       ownedUrls.current.forEach((url) => URL.revokeObjectURL(url));
@@ -138,10 +182,19 @@ export function VoiceScript({
     collectUrls();
   }
   function editLine(id: string, update: Partial<ScriptLine>) {
-    clear([id]);
+    const before = script.lines.find((line) => line.id === id);
+    if (!before) return;
+    const after = { ...before, ...update };
+    if (update.text !== undefined && before.readingSource === 'dictionary') {
+      delete after.spokenText;
+      delete after.readingSource;
+    }
+    if (after.spokenText === undefined) delete after.readingSource;
+    if (scriptAudioKey(before) !== scriptAudioKey(after)) clear([id]);
+    else stop();
     setScript((value) => ({
       ...value,
-      lines: value.lines.map((line) => (line.id === id ? { ...line, ...update } : line)),
+      lines: value.lines.map((line) => (line.id === id ? after : line)),
     }));
     setNotice('');
   }
@@ -160,6 +213,30 @@ export function VoiceScript({
       ? '未導入'
       : '未接続';
   }
+  function generationIssue(line: ScriptLine) {
+    if (!line.text.trim()) return 'セリフを入力してください';
+    if (!scriptSpokenText(line).trim()) return '読み上げ文を入力してください';
+    const status = availability(line);
+    return status === '試聴可能' ? null : status;
+  }
+  function publishGeneration(job: ScriptGenerationJob | null) {
+    generationRef.current = job;
+    setGenerationJob(job);
+  }
+  function retryGeneration(mode: ScriptRetryMode) {
+    const job = generationRef.current;
+    if (!job || locked || running.current) return;
+    const plan = generationRetryPlan(script, job, mode);
+    if (plan.invalidIds.length) {
+      setError('生成条件が変わった行があります。台本側から対象を選び直してください。');
+      return;
+    }
+    void generate(
+      undefined,
+      plan.lines.map((line) => line.id),
+      job,
+    );
+  }
   function act(action: () => void) {
     setError('');
     setNotice('');
@@ -171,19 +248,158 @@ export function VoiceScript({
       );
     }
   }
-  async function generate(forceId?: string, onlyIds?: string[]) {
-    if (locked || running.current || importing.current || !active || !opened || checking) return;
-    const targets = script.lines.filter((line) =>
-      forceId ? line.id === forceId : (!onlyIds || onlyIds.includes(line.id)) && !audio(line),
+  function applyRecast(plan: ScriptRecastPlan) {
+    if (locked || running.current || importing.current) return;
+    const snapshot = makeRecastSnapshot(script, plan);
+    const beforeAudio: Record<string, Preview> = {};
+    for (const row of snapshot.rows) {
+      const preview = previewRef.current[row.before.id];
+      if (preview?.key === scriptAudioKey(row.before)) beforeAudio[row.before.id] = preview;
+    }
+    const memory = { snapshot, beforeAudio };
+    memoryRef.current = memory;
+    setRecastMemory(memory);
+    clear(plan.audioChangedIds);
+    setScript(plan.script);
+    setRecastIds(plan.audioChangedIds);
+    setError('');
+    setNotice(
+      `${plan.changedIds.length}行の設定を差し替えました。音声が変わる${plan.audioChangedIds.length}行だけ再生成できます。ライブラリへの反映は保存してください。`,
     );
+  }
+  async function storedAudio(
+    operation: (projectId: string, token: number) => Promise<void>,
+    automatic = false,
+  ) {
     if (
-      !targets.length ||
-      targets.some((line) => !line.text.trim() || availability(line) !== '試聴可能')
+      disabled ||
+      busy ||
+      loading ||
+      exporting ||
+      switching ||
+      running.current ||
+      importing.current ||
+      cacheRunning.current
     )
       return;
+    let projectId: string | undefined;
+    try {
+      projectId = readWorkspaceProject(localStorage)?.id;
+    } catch {
+      /* Report below without changing saved data. */
+    }
+    if (!projectId) {
+      setCacheReady(true);
+      if (!automatic) setError('先に作品をブラウザに保存してください。');
+      return;
+    }
+    const token = ++cacheGeneration.current;
+    cacheRunning.current = true;
+    if (!automatic) {
+      setCacheBusy(true);
+      onBusyChange(true);
+    }
+    setError('');
+    try {
+      await operation(projectId, token);
+    } catch (cause) {
+      if (token === cacheGeneration.current)
+        setError(
+          cause instanceof Error &&
+            cause.name !== 'QuotaExceededError' &&
+            cause.message.length < 200
+            ? cause.message
+            : '音声を保存・読み込みできませんでした。保存容量を確認してください。現在の音声は保持しています。',
+        );
+    } finally {
+      if (token === cacheGeneration.current) {
+        setCacheReady(true);
+        cacheRunning.current = false;
+        if (!automatic) {
+          setCacheBusy(false);
+          onBusyChange(false);
+        }
+      }
+    }
+  }
+  async function restoreAudio(automatic = false) {
+    await storedAudio(async (projectId, token) => {
+      const { loadScriptAudio } = await import('../lib/script-audio-store');
+      const snapshot = scriptRef.current;
+      const saved = await loadScriptAudio(projectId, snapshot.lines);
+      if (token !== cacheGeneration.current || scriptRef.current !== snapshot) return;
+      const next = { ...previewRef.current };
+      let count = 0;
+      for (const item of saved) {
+        const line = snapshot.lines.find((l) => l.id === item.lineId)!;
+        if (next[line.id]?.key === item.key) continue;
+        const url = URL.createObjectURL(item.blob);
+        ownedUrls.current.add(url);
+        next[line.id] = { key: item.key, url, blob: item.blob, audition: item.audition };
+        count++;
+      }
+      previewRef.current = next;
+      setPreviews(next);
+      collectUrls();
+      if (count || !automatic)
+        setNotice(`条件が一致する保存音声を${count}行読み込みました。音声生成は行っていません。`);
+    }, automatic);
+  }
+  async function saveAudio() {
+    await storedAudio(async (projectId, token) => {
+      const saved = readWorkspaceProject(localStorage);
+      if (
+        JSON.stringify(saved?.documents.script) !==
+        JSON.stringify(scriptSchema.parse(scriptRef.current))
+      )
+        throw new Error('現在の台本を含む作品を先にブラウザに保存してください。');
+      const sources = scriptRef.current.lines.flatMap((line) => {
+        const preview = audio(line);
+        return preview ? [{ line, blob: preview.blob, audition: preview.audition }] : [];
+      });
+      const { saveScriptAudio } = await import('../lib/script-audio-store');
+      await saveScriptAudio(projectId, sources);
+      if (token === cacheGeneration.current)
+        setNotice(
+          `${sources.length}行の音声をこのブラウザに保存しました。再起動後に台本を開くと、条件が一致する音声を再利用します。`,
+        );
+    });
+  }
+  async function generate(forceId?: string, onlyIds?: string[], previousJob?: ScriptGenerationJob) {
+    if (
+      locked ||
+      !cacheReady ||
+      cacheRunning.current ||
+      running.current ||
+      importing.current ||
+      !active ||
+      !opened ||
+      checking
+    )
+      return;
+    if (previousJob && generationRef.current !== previousJob) return;
+    const targets = script.lines.filter((line) =>
+      forceId
+        ? line.id === forceId
+        : (!onlyIds || onlyIds.includes(line.id)) && (previousJob || !audio(line)),
+    );
+    if (!targets.length || targets.some((line) => generationIssue(line))) return;
+    let job: ScriptGenerationJob;
+    try {
+      job = startGenerationJob(script, targets, previousJob);
+    } catch {
+      setError('生成対象を確認できませんでした。現在の台本と音声は保持しています。');
+      return;
+    }
+    const update = (next: ScriptGenerationJob) => {
+      job = next;
+      publishGeneration(next);
+    };
+    update(job);
     stop();
     running.current = true;
     setBusy(true);
+    setStopping(false);
     onBusyChange(true);
     setError('');
     setNotice('');
@@ -193,6 +409,7 @@ export function VoiceScript({
     try {
       for (const line of targets) {
         if (request.signal.aborted) break;
+        update(updateGenerationRow(job, line.id, 'generating'));
         setGeneratingId(line.id);
         const candidate = castingCandidateSchema.parse(scriptCandidate(line));
         const model = currentModel(candidate);
@@ -201,7 +418,7 @@ export function VoiceScript({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             candidate: { voice: candidate.voice, recipe: candidate.recipe },
-            text: line.text,
+            text: scriptSpokenText(line),
           }),
           signal: request.signal,
         });
@@ -237,6 +454,7 @@ export function VoiceScript({
         previewRef.current = next;
         setPreviews(next);
         collectUrls();
+        update(updateGenerationRow(job, line.id, 'succeeded'));
         completed++;
       }
       setNotice(
@@ -246,14 +464,20 @@ export function VoiceScript({
       );
     } catch (e) {
       if (request.signal.aborted) setNotice('生成を中止しました。生成済みの行は保持しています。');
-      else
+      else {
+        const failedLine = targets[completed];
+        const message = e instanceof Error ? e.message : '音声を生成できませんでした。';
+        if (failedLine) update(updateGenerationRow(job, failedLine.id, 'failed', message));
         setError(
-          `第${script.lines.findIndex((line) => line.id === targets[completed]?.id) + 1}行：${e instanceof Error ? e.message : '音声を生成できませんでした。'} 生成済みの行は保持しています。`,
+          `第${script.lines.findIndex((line) => line.id === failedLine?.id) + 1}行：${message} 生成済みの行は保持しています。`,
         );
+      }
     } finally {
+      update(finishGenerationJob(job));
       controller.current = null;
       running.current = false;
       setBusy(false);
+      setStopping(false);
       setGeneratingId(null);
       onBusyChange(false);
     }
@@ -290,7 +514,7 @@ export function VoiceScript({
       if (file.size > maxScriptBytes) throw new Error('size');
       const saved = parseScript(await file.text());
       libraryRef.current?.replace(saved, () =>
-        localStorage.setItem(scriptStorageKey, serializeScript(saved)),
+        writeWorkspaceDocument(scriptStorageKey, serializeScript(saved)),
       );
     } catch {
       setError(
@@ -323,6 +547,84 @@ export function VoiceScript({
         </p>
         {error && <p role="alert">{error}</p>}
         {notice && <p role="status">{notice}</p>}
+        <details>
+          <summary>台本音声の保存と再利用</summary>
+          <section aria-label="台本音声の保存と再利用">
+            <p>
+              先に現在の台本を含む作品をブラウザに保存してください。音声はこのブラウザ専用で、作品JSONには含めません。1行20MiB・1作品64MiB・全作品128MiBまで保存します。
+            </p>
+            <div className="casting-actions">
+              <button
+                className="secondary-button"
+                disabled={locked || !cacheReady || !script.lines.some((line) => audio(line))}
+                onClick={() => void saveAudio()}
+              >
+                台本音声をブラウザに保存
+              </button>
+              <button
+                className="secondary-button"
+                disabled={locked || !cacheReady}
+                onClick={() => void restoreAudio()}
+              >
+                保存した台本音声を読み込む
+              </button>
+              <button
+                className="text-button"
+                disabled={locked || !cacheReady}
+                onClick={() => setDeleteAudio('project')}
+              >
+                この作品の保存音声を削除
+              </button>
+              <button
+                className="text-button"
+                disabled={locked || !cacheReady}
+                onClick={() => setDeleteAudio('all')}
+              >
+                全作品の保存音声を削除
+              </button>
+            </div>
+            {cacheBusy && <p role="status">保存音声を処理しています。</p>}
+            {deleteAudio && (
+              <div role="group" aria-label="保存音声の削除確認">
+                <p>
+                  {deleteAudio === 'all' ? '全作品' : 'この作品'}
+                  の保存音声を削除します。編集中の音声・台本・声の設定は保持します。
+                </p>
+                <button
+                  className="secondary-button"
+                  disabled={locked}
+                  onClick={() =>
+                    void storedAudio(async (id, token) => {
+                      const { deleteProjectAudio } = await import('../lib/script-audio-store');
+                      await deleteProjectAudio(deleteAudio === 'all' ? null : id);
+                      if (token === cacheGeneration.current) {
+                        setDeleteAudio(null);
+                        setNotice('保存音声を削除しました。現在の試聴音声は保持しています。');
+                      }
+                    })
+                  }
+                >
+                  確認した保存音声を削除
+                </button>
+                <button className="text-button" onClick={() => setDeleteAudio(null)}>
+                  保存音声の削除をキャンセル
+                </button>
+              </div>
+            )}
+          </section>
+        </details>
+        <PronunciationDictionary
+          script={script}
+          disabled={locked}
+          onApply={(plan) => {
+            if (locked) return;
+            clear(plan.audioChangedIds);
+            setScript(plan.script);
+            setNotice(
+              `${plan.changedIds.length}行の読み上げ文を反映しました。音声が変わる行だけ再生成してください。`,
+            );
+          }}
+        />
         <ScriptLibrary
           ref={libraryRef}
           script={script}
@@ -331,6 +633,10 @@ export function VoiceScript({
           onOpen={(value) => {
             discardRecastMemory();
             clear();
+            publishGeneration(null);
+            cacheGeneration.current++;
+            cacheRunning.current = false;
+            setCacheReady(false);
             setScript(value);
             setRecastIds([]);
             setError('');
@@ -345,9 +651,17 @@ export function VoiceScript({
           checking={checking}
           onImport={(value) =>
             libraryRef.current?.replace(value, () =>
-              localStorage.setItem(scriptStorageKey, serializeScript(value)),
+              writeWorkspaceDocument(scriptStorageKey, serializeScript(value)),
             )
           }
+        />
+        <ScriptSceneSettings
+          script={script}
+          assignments={assignments}
+          disabled={locked}
+          inventory={inventory}
+          checking={checking}
+          onApply={applyRecast}
         />
         <ScriptRecast
           script={script}
@@ -355,25 +669,7 @@ export function VoiceScript({
           disabled={locked}
           inventory={inventory}
           checking={checking}
-          onApply={(plan) => {
-            if (locked || running.current || importing.current) return;
-            const snapshot = makeRecastSnapshot(script, plan);
-            const beforeAudio: Record<string, Preview> = {};
-            for (const row of snapshot.rows) {
-              const preview = previewRef.current[row.before.id];
-              if (preview?.key === scriptAudioKey(row.before)) beforeAudio[row.before.id] = preview;
-            }
-            const memory = { snapshot, beforeAudio };
-            memoryRef.current = memory;
-            setRecastMemory(memory);
-            clear(plan.audioChangedIds);
-            setScript(plan.script);
-            setRecastIds(plan.audioChangedIds);
-            setError('');
-            setNotice(
-              `${plan.changedIds.length}行の設定を差し替えました。音声が変わる${plan.audioChangedIds.length}行だけ再生成できます。ライブラリへの反映は保存してください。`,
-            );
-          }}
+          onApply={applyRecast}
         />
         <ScriptRecastHistory
           ref={comparisonRef}
@@ -441,7 +737,7 @@ export function VoiceScript({
             disabled={locked}
             onClick={() =>
               act(() => {
-                localStorage.setItem(scriptStorageKey, serializeScript(script));
+                writeWorkspaceDocument(scriptStorageKey, serializeScript(script));
                 setNotice(
                   '台本をブラウザ内に保存しました。音声は再読み込み後に再生成してください。',
                 );
@@ -482,23 +778,34 @@ export function VoiceScript({
             className="secondary-button"
             disabled={
               locked ||
+              !cacheReady ||
               checking ||
               !missing.length ||
-              missing.some((line) => !line.text.trim() || availability(line) !== '試聴可能')
+              missing.some(
+                (line) =>
+                  !line.text.trim() ||
+                  !scriptSpokenText(line).trim() ||
+                  availability(line) !== '試聴可能',
+              )
             }
             onClick={() => void generate()}
           >
             未生成の行を台本順に生成
           </button>
-          {busy && <button onClick={() => controller.current?.abort()}>台本の生成を中止</button>}
           {recastIds.length > 0 && (
             <button
               className="secondary-button"
               disabled={
                 locked ||
+                !cacheReady ||
                 checking ||
                 !recastMissing.length ||
-                recastMissing.some((line) => !line.text.trim() || availability(line) !== '試聴可能')
+                recastMissing.some(
+                  (line) =>
+                    !line.text.trim() ||
+                    !scriptSpokenText(line).trim() ||
+                    availability(line) !== '試聴可能',
+                )
               }
               onClick={() => void generate(undefined, recastIds)}
             >
@@ -520,6 +827,20 @@ export function VoiceScript({
             台本の連続試聴を停止
           </button>
         </div>
+        <ScriptGenerationPanel
+          job={generationJob}
+          script={script}
+          busy={busy}
+          disabled={locked || !cacheReady || checking}
+          stopping={stopping}
+          issue={generationIssue}
+          onStop={() => {
+            setStopping(true);
+            controller.current?.abort();
+          }}
+          onRetry={retryGeneration}
+          onDismiss={() => publishGeneration(null)}
+        />
         <label>
           結合WAVの行間（ミリ秒）
           <input
@@ -617,11 +938,45 @@ export function VoiceScript({
                     onChange={(e) => editLine(line.id, { text: e.target.value })}
                   />
                 </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    aria-label={`第${index + 1}行の読み上げ文を別に指定`}
+                    checked={line.spokenText !== undefined}
+                    disabled={locked}
+                    onChange={(e) =>
+                      editLine(line.id, {
+                        spokenText: e.target.checked ? line.text : undefined,
+                        readingSource: e.target.checked ? 'manual' : undefined,
+                      })
+                    }
+                  />
+                  読み上げ文を別に指定
+                </label>
+                {line.spokenText !== undefined && (
+                  <label>
+                    読み上げ文{line.readingSource === 'dictionary' ? '（辞書から反映）' : ''}
+                    <textarea
+                      aria-label={`第${index + 1}行の読み上げ文`}
+                      maxLength={300}
+                      disabled={locked}
+                      value={line.spokenText}
+                      onChange={(e) =>
+                        editLine(line.id, { spokenText: e.target.value, readingSource: 'manual' })
+                      }
+                    />
+                  </label>
+                )}
                 <div className="casting-actions">
                   <button
                     className="secondary-button"
                     disabled={
-                      locked || checking || !line.text.trim() || availability(line) !== '試聴可能'
+                      locked ||
+                      !cacheReady ||
+                      checking ||
+                      !line.text.trim() ||
+                      !scriptSpokenText(line).trim() ||
+                      availability(line) !== '試聴可能'
                     }
                     onClick={() => void generate(line.id)}
                   >

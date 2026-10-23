@@ -12,6 +12,126 @@
   --line: #e3e7df;
   --soft: #eff3ec;
 }
+.pronunciation-dictionary section,
+.pronunciation-dictionary fieldset,
+.script-scene-settings section,
+.script-scene-settings fieldset {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.voice-script input[type='checkbox'] {
+  width: auto;
+}
+.script-scene-settings ul {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.script-scene-settings li label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+}
+.script-scene-settings li input[type='checkbox'] {
+  flex: none;
+  margin-top: 0.35em;
+}
+.script-generation {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px;
+  background: var(--soft);
+  overflow-wrap: anywhere;
+}
+.script-generation progress {
+  width: 100%;
+  accent-color: var(--green);
+}
+.script-generation > ol {
+  list-style: none;
+  padding: 0;
+}
+.script-generation li {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.script-generation li p {
+  margin: 4px 0;
+}
+.project-panel,
+.connection-guide {
+  max-width: 1304px;
+  margin: 16px auto;
+  padding: 18px 24px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fffdf9;
+}
+.project-panel > summary,
+.connection-guide > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.project-panel section,
+.connection-guide section {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+  min-width: 0;
+}
+.project-panel label,
+.connection-guide label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.project-panel input,
+.connection-guide select,
+.connection-guide textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 10px;
+  background: white;
+}
+.connection-guide fieldset {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  border: 1px solid var(--line);
+}
+.connection-guide audio {
+  width: min(100%, 420px);
+}
+.project-confirmation {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  background: var(--soft);
+  overflow-wrap: anywhere;
+}
+.connection-diagnostics {
+  padding-left: 22px;
+}
+@media (max-width: 1380px) {
+  .project-panel,
+  .connection-guide {
+    margin-left: 24px;
+    margin-right: 24px;
+  }
+}
+@media (max-width: 600px) {
+  .project-panel,
+  .connection-guide {
+    margin-left: 16px;
+    margin-right: 16px;
+    padding: 16px;
+  }
+}
 * {
   box-sizing: border-box;
 }
