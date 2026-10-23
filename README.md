@@ -188,7 +188,7 @@ docs/                設計、出典、開発方針
 
 今後の開発は[開発計画](docs/roadmap.md)に沿って、実機評価・作品の保存と再開・台本制作の改善を進めます。実機で同じ6文を生成して待ち時間・条件を記録する `npm run evaluate:voice` と、[聴取評価の手順](docs/listening-evaluation.md)を用意しています。実機の聴取評価と初回利用者による確認は未実施です。
 
-Irodoriの声づくりに向けて、`npm run evaluate:irodori`で環境診断とローカル評価を行えます。VoiceDesignの説明文と通常モデルの参照音声を分け、文章・seed・生成ステップを比較し、音声・待ち時間・メモリー観測値を保存します。[技術検証の手順](docs/irodori-evaluation.md)を参照してください。VoiceDesign v2では実モデルの生成速度・メモリーを測定済みです。聴取による品質評価は[TODO](docs/irodori-evaluation.md#保留中の試聴todo)で、画面への統合と通常モデルの実機評価は未実施です。普段のアプリ利用にPythonやIrodoriの導入は不要です。
+Irodoriの声づくりに向けて、`npm run evaluate:irodori`で環境診断とローカル評価を行えます。VoiceDesignの説明文と通常モデルの参照音声を分け、文章・seed・生成ステップを比較し、音声・待ち時間・メモリー観測値を保存します。保存済み音声の比較と聴取メモには`--review-run`でローカル画面を起動できます。[技術検証の手順](docs/irodori-evaluation.md)を参照してください。VoiceDesign v2では実モデルの生成速度・メモリーを測定済みです。聴取による品質評価は[TODO](docs/irodori-evaluation.md#保留中の試聴todo)で、通常の声選び画面への統合と通常モデルの実機評価は未実施です。普段のアプリ利用にPythonやIrodoriの導入は不要です。
 
 評価設定と出力先へ`--preflight`を付けると、モデルの重みを読まずに、必要なファイル・依存環境・指定デバイス・tokenizerキャッシュ・出力容量を確認できます。出力先の作成やモデルの取得は行わず、不足をまとめて表示します。
 

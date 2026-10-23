@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { irodoriEvaluationSchema, makeIrodoriPlan } from '../shared/irodori-evaluation';
 import { baselineWarnings, memoryReport } from './irodori-memory';
+import { startIrodoriReview } from './irodori-review';
 
 async function main() {
   const { values } = parseArgs({
@@ -21,6 +22,7 @@ async function main() {
       'allow-legacy-run': { type: 'boolean' },
       'memory-report': { type: 'string', multiple: true },
       'memory-baseline': { type: 'string' },
+      'review-run': { type: 'string', multiple: true },
       help: { type: 'boolean' },
     },
   });
@@ -34,8 +36,15 @@ async function main() {
 --recover-run 既存の出力先: 停止済みのrunningランをinterruptedに整理。元の記録をバックアップします。
 古いPIDなしのランだけ、停止を別途確認して --allow-legacy-run を追加します。
 --memory-report 出力先 [--memory-report 別の出力先]: 実測メモリーと生成時間を比較表示。
+--review-run 出力先 [--review-run 別の出力先]: 保存済みWAVの比較・聴取メモ用画面をローカルで起動。
 --config 設定.json --output 新しい出力先 --memory-baseline 既存の出力先: 過去ランから生成前の注意を表示。
 設定例・必要な準備・測定値の範囲は docs/irodori-evaluation.md を参照してください。`);
+    return;
+  }
+  if (values['review-run']) {
+    if (Object.entries(values).some(([key, value]) => key !== 'review-run' && value !== undefined))
+      throw new Error('--review-run はほかの操作と併用できません。');
+    await startIrodoriReview(values['review-run']);
     return;
   }
   if (values['memory-report']) {

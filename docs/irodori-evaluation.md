@@ -144,6 +144,20 @@ npm run evaluate:irodori -- \
 
 ## 聴取して次の構成を決める
 
+### ローカル試聴レビュー画面
+
+既存ランのWAVと生成条件を画面で確認し、最大8ランの音声から2件を並べて選べる。モデルの読み込みや新しい音声生成は行わない。
+
+```sh
+npm run evaluate:irodori -- \
+  --review-run .local-artifacts/irodori/design-run-3 \
+  --review-run .local-artifacts/irodori/design-run-15
+```
+
+表示された`http://127.0.0.1:PORT`をローカルのブラウザーで開く。A/Bの再生は一方を開始すると他方を停止する。各音声の文章・caption・seed・step・生成枠・長さと、ランの状態を確認できる。WAVは表示前にmanifestのSHA-256と照合し、不一致なら配信を拒否する。未完了ランにある保存済み音声も表示する。
+
+全体と音声ごとのメモは各ランの`review.json`に保存する。聴取前は「下書き・未判定」のままにし、聴取を終えた場合だけ「聴取済み」を選ぶ。別画面から先に保存された場合は上書きを拒否するので、再読み込みして内容を確認する。`manifest.json`とWAVは変更せず、manifest内の`listening.status`も更新しない。聴取結果は`review.json`を見る。レビュー記録には文章やローカルパスが含まれるため、共有時には内容を確認する。画面はループバックで一時ポートを使い、コマンドを停止すると終了する。
+
 生成成功でも`listening.status`は`not-reviewed`。ハッシュ一致だけで異なる文章の話者一貫性や音質合格とは判断しない。既存の[聴取評価の観点](listening-evaluation.md)に加え、次を手動で記録する。
 
 1. captionの意図に沿うか、文章が変わっても同じキャラクターとして使えるか。
