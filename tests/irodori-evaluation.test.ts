@@ -4,7 +4,9 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { totalmem } from 'node:os';
 import { makeIrodoriPlan, irodoriEvaluationSchema } from '../shared/irodori-evaluation';
+import { baselineWarnings, memoryReport } from '../server/irodori-memory';
 
 const config = {
   format: 'voice-atlas-irodori-config',
@@ -657,5 +659,94 @@ describe('Irodori subprocess contract (synthetic runtime only)', () => {
     ]).result;
     expect(recovered.code).toBe(0);
     expect((await f.manifest()).recovery.reason).toBe('legacy-run-manually-confirmed');
+  });
+  it('compares completed runs and warns about measured MPS pressure before a longer run', async () => {
+    const f = await fixture();
+    expect((await f.run()).code).toBe(0);
+    const manifest = await f.manifest();
+    manifest.plan.config.device = 'mps';
+    manifest.plan.config.seconds = 10;
+    manifest.machine = {
+      platform:
+        process.platform === 'darwin'
+          ? 'Darwin'
+          : process.platform === 'linux'
+            ? 'Linux'
+            : process.platform,
+      arch: process.arch,
+    };
+    manifest.afterLoadMemory.mpsDriverAllocatedBytes = Math.round(totalmem() * 0.72);
+    manifest.samples[0].memory.mpsDriverAllocatedBytes = Math.round(totalmem() * 0.74);
+    await writeFile(join(f.output, 'manifest.json'), JSON.stringify(manifest));
+    const report = await memoryReport([f.output, f.output]);
+    expect(report.runs[0]).toMatchObject({
+      generationCapSeconds: 10,
+      maxObservedMpsDriverAllocatedBytes: Math.round(totalmem() * 0.74),
+      completedSamples: 5,
+    });
+    expect(report.comparisons[0]).toMatchObject({
+      comparable: true,
+      medianGenerationMsDifference: 0,
+      maxObservedMpsDriverAllocatedBytesDifference: 0,
+    });
+    const warning = await baselineWarnings(f.output, {
+      ...f.plan.config,
+      device: 'mps',
+      seconds: 15,
+    });
+    expect(warning.warnings).toEqual([
+      expect.stringContaining('15秒'),
+      expect.stringContaining('約74%'),
+    ]);
+    const cliReport = await cli(['--memory-report', f.output, '--memory-report', f.output]).result;
+    expect(cliReport.code).toBe(0);
+    expect(JSON.parse(cliReport.stdout).comparisons[0].comparable).toBe(true);
+  });
+  it('marks incomplete or mismatched runs as incomparable and rejects baseline device mismatch', async () => {
+    const f = await fixture();
+    expect((await f.run()).code).toBe(0);
+    const other = join(f.dir, 'other');
+    await mkdir(other);
+    const manifest = await f.manifest();
+    manifest.status = 'interrupted';
+    manifest.plan.config.seconds = 15;
+    await writeFile(join(other, 'manifest.json'), JSON.stringify(manifest));
+    const report = await memoryReport([f.output, other]);
+    expect(report.comparisons[0]).toMatchObject({
+      comparable: false,
+      medianGenerationMsDifference: null,
+      reasons: [expect.stringContaining('生成枠'), expect.stringContaining('未完了')],
+    });
+    await expect(baselineWarnings(f.output, { ...f.plan.config, device: 'mps' })).rejects.toThrow(
+      'device/mode',
+    );
+  });
+  it('prints baseline warnings before a read-only preflight without changing the saved run', async () => {
+    const f = await fixture();
+    expect((await f.run()).code).toBe(0);
+    const manifest = await f.manifest();
+    manifest.plan.config.seconds = 10;
+    await writeFile(join(f.output, 'manifest.json'), JSON.stringify(manifest));
+    const saved = await readFile(join(f.output, 'manifest.json'), 'utf8');
+    const configFile = join(f.dir, 'longer.json');
+    await writeFile(configFile, JSON.stringify({ ...f.plan.config, seconds: 15 }));
+    const result = await cli([
+      '--repo',
+      f.repo,
+      '--python',
+      'python3',
+      '--config',
+      configFile,
+      '--output',
+      join(f.dir, 'next-run'),
+      '--preflight',
+      '--memory-baseline',
+      f.output,
+    ]).result;
+    expect(result.code).toBe(0);
+    expect(result.stderr).toContain('今回の生成枠15秒');
+    expect(JSON.parse(result.stdout).status).toBe('passed');
+    expect(await readFile(join(f.output, 'manifest.json'), 'utf8')).toBe(saved);
+    await expect(readdir(join(f.dir, 'next-run'))).rejects.toThrow();
   });
 });

@@ -120,6 +120,26 @@ npm run evaluate:irodori -- --recover-run /path/to/old-stopped-run --allow-legac
 
 非対応デバイスの値はnull。実際の低メモリー端末での最大消費量や同時実行の余裕は、この記録だけで判断しない。
 
+### 実測メモリーの比較と次回実行前の注意
+
+```sh
+# モデルを読み込まず、既存ランを比較する。最初のランを基準にする。
+npm run evaluate:irodori -- \
+  --memory-report .local-artifacts/irodori/design-run-3 \
+  --memory-report .local-artifacts/irodori/design-run-15
+
+# 過去ランを指定して、生成・事前チェックの開始前に注意を表示する。
+npm run evaluate:irodori -- \
+  --config .local-artifacts/irodori/design-15.json \
+  --output .local-artifacts/irodori/next-run \
+  --memory-baseline .local-artifacts/irodori/design-run-3 \
+  --preflight
+```
+
+比較結果はランごとの音声件数、生成枠、生成時間の中央値、MPSドライバー割り当て・CUDA割り当て・プロセスRSSの最大観測値をバイトで示す。差分はmode・device・OS/CPU・checkpointのSHA-256・生成枠が同じで、両方完了した場合だけ出す。未完了や条件違いでは理由を表示して差分をnullにする。観測回数やセリフが違えば、条件が一致しても厳密な性能比較にはならない。
+
+`--memory-baseline`はmode/deviceが違う基準ランを拒否し、同じ端末・checkpointか、基準ランが未完了か、今回の生成枠が長いかを表示する。同じ端末のMPSドライバー割り当て最大観測値が物理メモリーの65%以上なら、メモリー圧縮・swapの可能性を注意として出す。閾値は負荷の予測や安全上限ではなく、過去の観測値を見落とさないための表示基準。音声生成を自動停止せず、利用者が設定した条件のまま進む。MPS観測値はピークではなく、RSSとは合算しない。基準ランのWAVやmanifestは変更しない。
+
 記録にはローカルの絶対パスと自由記述が含まれる。外へ共有するときは内容を確認する。通常の作品保存・台本・声ライブラリには取り込まず、評価用ディレクトリー内で管理する。
 
 ## 聴取して次の構成を決める

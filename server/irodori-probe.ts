@@ -5,6 +5,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { irodoriEvaluationSchema, makeIrodoriPlan } from '../shared/irodori-evaluation';
+import { baselineWarnings, memoryReport } from './irodori-memory';
 
 async function main() {
   const { values } = parseArgs({
@@ -18,6 +19,8 @@ async function main() {
       'inspect-run': { type: 'string' },
       'recover-run': { type: 'string' },
       'allow-legacy-run': { type: 'boolean' },
+      'memory-report': { type: 'string', multiple: true },
+      'memory-baseline': { type: 'string' },
       help: { type: 'boolean' },
     },
   });
@@ -30,7 +33,26 @@ async function main() {
 --inspect-run 既存の出力先: 記録と保存済みWAVを点検。変更はしません。
 --recover-run 既存の出力先: 停止済みのrunningランをinterruptedに整理。元の記録をバックアップします。
 古いPIDなしのランだけ、停止を別途確認して --allow-legacy-run を追加します。
+--memory-report 出力先 [--memory-report 別の出力先]: 実測メモリーと生成時間を比較表示。
+--config 設定.json --output 新しい出力先 --memory-baseline 既存の出力先: 過去ランから生成前の注意を表示。
 設定例・必要な準備・測定値の範囲は docs/irodori-evaluation.md を参照してください。`);
+    return;
+  }
+  if (values['memory-report']) {
+    if (
+      values.config ||
+      values.output ||
+      values.plan ||
+      values.preflight ||
+      values.repo ||
+      values.python ||
+      values['inspect-run'] ||
+      values['recover-run'] ||
+      values['memory-baseline'] ||
+      values['allow-legacy-run']
+    )
+      throw new Error('--memory-report はほかの操作と併用できません。');
+    console.log(JSON.stringify(await memoryReport(values['memory-report']), null, 2));
     return;
   }
   const runPath = values['inspect-run'] ?? values['recover-run'];
@@ -38,7 +60,15 @@ async function main() {
     throw new Error('--inspect-run と --recover-run は併用できません。');
   if (values['allow-legacy-run'] && !values['recover-run'])
     throw new Error('--allow-legacy-run には --recover-run が必要です。');
-  if (runPath && (values.config || values.output || values.plan || values.preflight || values.repo))
+  if (
+    runPath &&
+    (values.config ||
+      values.output ||
+      values.plan ||
+      values.preflight ||
+      values.repo ||
+      values['memory-baseline'])
+  )
     throw new Error('既存ランの点検・整理は生成・診断の引数と併用できません。');
   if (runPath) {
     const bridge = fileURLToPath(new URL('./irodori-evaluate.py', import.meta.url));
@@ -68,6 +98,8 @@ async function main() {
   if (values.plan && values.preflight) throw new Error('--plan と --preflight は併用できません。');
   if (values.preflight && !values.output)
     throw new Error('--preflight には検査する --output が必要です。');
+  if (values['memory-baseline'] && (!values.config || !values.output || values.plan))
+    throw new Error('--memory-baseline には --config と --output が必要です。');
   const repo = resolve(values.repo ?? '../Irodori-TTS');
   let plan: ReturnType<typeof makeIrodoriPlan> | undefined;
   if (values.config) {
@@ -100,6 +132,13 @@ async function main() {
       return;
     }
     if (!values.output) throw new Error('生成には新しい --output を指定してください。');
+  }
+  if (values['memory-baseline'] && plan) {
+    const result = await baselineWarnings(values['memory-baseline'], plan.config);
+    console.error(
+      `基準ラン: ${result.baseline.directory}（${result.baseline.completedSamples}件、生成枠${result.baseline.generationCapSeconds}秒）`,
+    );
+    for (const warning of result.warnings) console.error(`注意: ${warning}`);
   }
   const venv = resolve(repo, '.venv/bin/python');
   const python =
