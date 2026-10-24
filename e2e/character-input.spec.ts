@@ -16,6 +16,7 @@ const capabilities = {
   openai: { ready: true, model: 'test' },
   anthropic: { ready: true, model: 'test' },
   gemini: { ready: true, model: 'test' },
+  deepseek: { ready: true, model: 'test' },
   voicevox: {
     ready: true,
     detail: '接続済み',
@@ -54,6 +55,7 @@ for (const { provider, label, display } of [
   { provider: 'openai', label: 'OpenAI', display: 'OpenAI' },
   { provider: 'anthropic', label: 'Claude', display: 'Anthropic（Claude）' },
   { provider: 'gemini', label: 'Gemini', display: 'Google（Gemini）' },
+  { provider: 'deepseek', label: 'DeepSeek', display: 'DeepSeek' },
 ]) {
   test(`creates a direction from text via ${label} without uploading an image`, async ({
     page,
@@ -127,6 +129,79 @@ for (const { provider, label, display } of [
     expect(errors).toEqual([]);
   });
 }
+test('shows a manual retry after a DeepSeek format error', async ({ page }) => {
+  let sent = 0;
+  await page.route('**/api/analyze', async (route) => {
+    sent++;
+    await route.fulfill(
+      sent === 1
+        ? {
+            status: 502,
+            json: {
+              error:
+                'DeepSeekの解析結果の形式が合いませんでした。自動再試行後も失敗しました。もう一度お試しください。',
+            },
+          }
+        : { json: { analysis, provider: 'deepseek' } },
+    );
+  });
+  await page.goto('/');
+  await page.getByRole('radio', { name: '設定テキストのみ', exact: true }).check();
+  await page.getByRole('radio', { name: 'DeepSeek' }).check();
+  await page.locator('#character-setting').fill(setting);
+  await page.getByRole('checkbox', { name: /DeepSeekに送信することに同意する/ }).check();
+  await page.getByRole('button', { name: '設定から声の演出案を作る' }).click();
+  await expect(page.getByRole('alert')).toContainText('自動再試行後も失敗');
+  await page.getByRole('button', { name: '手動で再試行' }).click();
+  await expect(page.locator('.analysis-card')).toContainText(analysis.summary);
+  expect(sent).toBe(2);
+});
+test('applies an image correction as author settings before reanalysis', async ({ page }) => {
+  const requests: Array<Record<string, unknown>> = [];
+  await page.route('**/api/analyze', async (route) => {
+    requests.push(route.request().postDataJSON());
+    await route.fulfill({
+      json: {
+        analysis: {
+          ...analysis,
+          summary:
+            requests.length === 1
+              ? '耳元に端末がある演出案です。'
+              : '頬の装飾を参考にした演出案です。',
+          cues: requests.length === 1 ? ['耳元の端末'] : ['頬の白い装飾'],
+        },
+        provider: 'deepseek',
+      },
+    });
+  });
+  await page.goto('/');
+  const buffer = await sharp({
+    create: { width: 48, height: 64, channels: 3, background: '#81a292' },
+  })
+    .png()
+    .toBuffer();
+  await page.locator('#character-image').setInputFiles({
+    name: 'character.png',
+    mimeType: 'image/png',
+    buffer,
+  });
+  await page.getByRole('radio', { name: 'DeepSeek' }).check();
+  await page.getByRole('checkbox', { name: /DeepSeekに送信することに同意する/ }).check();
+  await page.getByRole('button', { name: '画像から声の演出案を作る' }).click();
+  await expect(page.locator('.analysis-card')).toContainText('耳元の端末');
+  await page.locator('#visual-correction').fill('耳元に端末はありません。頬の白い線は装飾です。');
+  await page.getByRole('button', { name: '訂正を設定に反映' }).click();
+  await expect(page.locator('#character-setting')).toHaveValue(
+    '画像についての作者の訂正: 耳元に端末はありません。頬の白い線は装飾です。',
+  );
+  await expect(page.locator('.input-change-note')).toBeVisible();
+  await expect(page.locator('.consent input')).not.toBeChecked();
+  await page.getByRole('checkbox', { name: /DeepSeekに送信することに同意する/ }).check();
+  await page.getByRole('button', { name: '画像から声の演出案を作る' }).click();
+  await expect(page.locator('.analysis-card')).toContainText('頬の白い装飾');
+  expect(requests).toHaveLength(2);
+  expect(requests[1].characterText).toContain('耳元に端末はありません');
+});
 
 test('preserves draft and evaluated character settings separately through comparison, JSON restoration and aggregation', async ({
   page,
@@ -201,6 +276,7 @@ test('keeps manual discovery offline and explicitly requires manual interpretati
         openai: { ready: false, model: 'test' },
         anthropic: { ready: false, model: 'test' },
         gemini: { ready: false, model: 'test' },
+        deepseek: { ready: false, model: 'test' },
       },
     }),
   );

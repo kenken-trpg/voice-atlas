@@ -19,6 +19,8 @@ const config: Config = {
   anthropicModel: 'unused',
   geminiKey: '',
   geminiModel: 'unused',
+  deepseekKey: '',
+  deepseekModel: 'unused',
   voicevoxUrl: 'http://127.0.0.1:1',
 };
 const candidate = makeCastingEvaluation().candidates[1];

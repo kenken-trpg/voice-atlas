@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loadConfig } from '../server/config';
-import { defaultAnthropicModel, defaultGeminiModel } from '../shared/schema';
+import { defaultAnthropicModel, defaultDeepseekModel, defaultGeminiModel } from '../shared/schema';
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -34,5 +34,21 @@ describe('Gemini server configuration', () => {
     vi.stubEnv('GEMINI_API_KEY', '  ');
     vi.stubEnv('GEMINI_MODEL', '');
     expect(loadConfig()).toMatchObject({ geminiKey: '', geminiModel: defaultGeminiModel });
+  });
+});
+
+describe('DeepSeek server configuration', () => {
+  it('reads the key and model from server environment variables', () => {
+    vi.stubEnv('DEEPSEEK_API_KEY', '  test-deepseek-config-key  ');
+    vi.stubEnv('DEEPSEEK_MODEL', 'test-configured-deepseek');
+    expect(loadConfig()).toMatchObject({
+      deepseekKey: 'test-deepseek-config-key',
+      deepseekModel: 'test-configured-deepseek',
+    });
+  });
+  it('keeps DeepSeek unconfigured until a key is supplied', () => {
+    vi.stubEnv('DEEPSEEK_API_KEY', '  ');
+    vi.stubEnv('DEEPSEEK_MODEL', '');
+    expect(loadConfig()).toMatchObject({ deepseekKey: '', deepseekModel: defaultDeepseekModel });
   });
 });
