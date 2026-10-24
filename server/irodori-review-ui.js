@@ -21,7 +21,7 @@ function label(parent, name, control) {
   return control;
 }
 function sampleTitle(run, sample) {
-  return `${run.directory.split('/').at(-1)} / ${sample.id} / seed ${sample.seed} / ${sample.steps} step`;
+  return `${run.name} / ${sample.id} / seed ${sample.seed} / ${sample.steps} step`;
 }
 function makePlayer(slot) {
   const card = $('section');
@@ -40,7 +40,7 @@ function makePlayer(slot) {
   });
   for (const run of runs) {
     const group = $('optgroup');
-    group.label = `${run.directory.split('/').at(-1)}（${run.status}）`;
+    group.label = `${run.name}（${run.status}）`;
     for (const sample of run.samples) {
       const option = $('option', sampleTitle(run, sample));
       option.value = `${run.index}:${sample.id}`;
@@ -82,7 +82,7 @@ for (const run of runs) {
   const state = reviews[run.index];
   const card = $('section');
   card.className = 'card';
-  card.append($('h2', run.directory.split('/').at(-1)));
+  card.append($('h2', run.name));
   card.append($('p', `${run.mode} / ${run.device} / ${run.status} / ${run.samples.length}件`));
   const summary = $('textarea');
   summary.value = state.review.summary;

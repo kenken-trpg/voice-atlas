@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { lstat, readFile, rename, writeFile, unlink } from 'node:fs/promises';
 import { createServer } from 'node:http';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { z } from 'zod';
@@ -101,6 +101,13 @@ export function createIrodoriReviewApp(runs: PreparedRun[]) {
       res.status(403).end();
       return;
     }
+    if (
+      req.headers['sec-fetch-site'] === 'cross-site' ||
+      (req.headers.origin && req.headers.origin !== `http://127.0.0.1:${req.socket.localPort}`)
+    ) {
+      res.status(403).end();
+      return;
+    }
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader(
@@ -121,7 +128,7 @@ export function createIrodoriReviewApp(runs: PreparedRun[]) {
     res.json(
       runs.map(({ directory, samples, ...run }) => ({
         ...run,
-        directory,
+        name: basename(directory),
         samples: samples.map(({ sha256, ...sample }) => sample),
       })),
     ),
@@ -159,7 +166,14 @@ export function createIrodoriReviewApp(runs: PreparedRun[]) {
   });
   app.put(
     '/api/review/:index',
-    express.json({ limit: '64kb', strict: true }),
+    (req, res, next) => {
+      if (!req.is('application/json')) {
+        res.status(415).json({ error: 'application/jsonで送信してください。' });
+        return;
+      }
+      next();
+    },
+    express.json({ limit: '64kb', strict: true, inflate: false }),
     async (req, res, next) => {
       try {
         if (req.headers.origin !== `http://127.0.0.1:${req.socket.localPort}`) {
@@ -221,10 +235,15 @@ export function createIrodoriReviewApp(runs: PreparedRun[]) {
   );
   app.use(
     (error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-      const message = error instanceof Error ? error.message : '処理に失敗しました。';
-      res
-        .status(error instanceof z.ZodError || error instanceof SyntaxError ? 400 : 500)
-        .json({ error: message });
+      if (error instanceof z.ZodError || error instanceof SyntaxError) {
+        res.status(400).json({ error: '入力の形式を確認してください。' });
+      } else if ((error as { type?: string })?.type === 'entity.too.large') {
+        res.status(413).json({ error: '送信データが上限を超えました。' });
+      } else if ((error as { type?: string })?.type === 'encoding.unsupported') {
+        res.status(415).json({ error: '圧縮せずにJSONを送信してください。' });
+      } else {
+        res.status(500).json({ error: '処理に失敗しました。' });
+      }
     },
   );
   return app;
