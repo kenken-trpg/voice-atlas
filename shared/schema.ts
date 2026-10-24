@@ -1,15 +1,17 @@
 import { z } from 'zod';
 
-export const providerSchema = z.enum(['ollama', 'openai', 'anthropic', 'gemini']);
+export const providerSchema = z.enum(['ollama', 'openai', 'anthropic', 'gemini', 'deepseek']);
 export type Provider = z.infer<typeof providerSchema>;
 export const providerLabels: Record<Provider, string> = {
   ollama: 'Ollama',
   openai: 'OpenAI',
   anthropic: 'Anthropic（Claude）',
   gemini: 'Google（Gemini）',
+  deepseek: 'DeepSeek',
 };
 export const defaultAnthropicModel = 'claude-sonnet-5-5';
 export const defaultGeminiModel = 'gemini-3.8-flash';
+export const defaultDeepseekModel = 'deepseek-flash';
 
 export const axes = ['pitch', 'energy', 'warmth', 'airiness'] as const;
 export const axisLabels: Record<(typeof axes)[number], string> = {
@@ -161,6 +163,7 @@ export interface Capabilities {
   openai: { ready: boolean; model: string };
   anthropic: { ready: boolean; model: string };
   gemini: { ready: boolean; model: string };
+  deepseek: { ready: boolean; model: string };
   voicevox: {
     ready: boolean;
     detail: string;

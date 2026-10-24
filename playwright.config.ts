@@ -20,6 +20,7 @@ export default defineConfig({
       OPENAI_API_KEY: '',
       ANTHROPIC_API_KEY: '',
       GEMINI_API_KEY: '',
+      DEEPSEEK_API_KEY: '',
       OLLAMA_BASE_URL: 'http://127.0.0.1:1',
       VOICEVOX_BASE_URL: 'http://127.0.0.1:1',
       AIVIS_BASE_URL: 'http://127.0.0.1:1',

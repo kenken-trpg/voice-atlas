@@ -21,6 +21,8 @@ const config: Config = {
   anthropicModel: 'test-claude-vision',
   geminiKey: 'test-gemini-key-not-real',
   geminiModel: 'test-gemini-vision',
+  deepseekKey: 'test-deepseek-key-not-real',
+  deepseekModel: 'test-deepseek-vision',
   voicevoxUrl: 'http://127.0.0.1:50021',
 };
 const mockFetch = vi.fn<typeof fetch>();
@@ -71,6 +73,8 @@ describe('local API boundaries', () => {
     expect(body.openai.ready).toBe(true);
     expect(body.anthropic).toEqual({ ready: true, model: config.anthropicModel });
     expect(body.gemini).toEqual({ ready: true, model: config.geminiModel });
+    expect(body.deepseek).toEqual({ ready: true, model: config.deepseekModel });
+    expect(JSON.stringify(body)).not.toContain(config.deepseekKey);
     expect(JSON.stringify(body)).not.toContain(config.geminiKey);
     expect(JSON.stringify(body)).not.toContain(config.anthropicKey);
     expect(JSON.stringify(body)).not.toContain(config.openaiKey);
@@ -261,7 +265,7 @@ describe('local API boundaries', () => {
   });
 });
 describe('vision provider contracts (mocked, no paid requests)', () => {
-  it.each(['ollama', 'openai', 'anthropic', 'gemini'] as const)(
+  it.each(['ollama', 'openai', 'anthropic', 'gemini', 'deepseek'] as const)(
     'creates a text-only direction via %s without any image payload',
     async (provider) => {
       const textAnalysis = {
@@ -272,7 +276,7 @@ describe('vision provider contracts (mocked, no paid requests)', () => {
       const envelope =
         provider === 'ollama'
           ? { message: { content: JSON.stringify(textAnalysis) } }
-          : provider === 'openai'
+          : provider === 'openai' || provider === 'deepseek'
             ? {
                 status: 'completed',
                 output: [
@@ -322,11 +326,16 @@ describe('vision provider contracts (mocked, no paid requests)', () => {
         '"source"',
       ])
         expect(encoded).not.toContain(marker);
-      if (provider === 'openai') {
+      if (provider === 'openai' || provider === 'deepseek') {
         expect(payload.input[0].content).toHaveLength(1);
         expect(payload.input[0].content[0].type).toBe('input_text');
-        expect(payload.store).toBe(false);
-        expect(payload.text.format.strict).toBe(true);
+        if (provider === 'openai') {
+          expect(payload.store).toBe(false);
+          expect(payload.text.format.strict).toBe(true);
+        } else {
+          expect(payload.reasoning.effort).toBe('none');
+          expect(payload.max_output_tokens).toBe(4096);
+        }
       }
     },
   );
@@ -339,7 +348,7 @@ describe('vision provider contracts (mocked, no paid requests)', () => {
       { inputMode: 'unknown', characterText: '司書' },
     ])
       expect((await post('/api/analyze', { provider: 'ollama', ...input })).status).toBe(400);
-    for (const provider of ['openai', 'anthropic', 'gemini']) {
+    for (const provider of ['openai', 'anthropic', 'gemini', 'deepseek']) {
       const response = await post('/api/analyze', {
         provider,
         inputMode: 'text',
@@ -571,7 +580,7 @@ describe('speaker resolution and synthesis parameters', () => {
 describe('provider failures and image metadata', () => {
   it('reports malformed provider envelopes as upstream failures', async () => {
     mockFetch.mockImplementation(async () => json({ unexpected: true }));
-    for (const provider of ['ollama', 'openai', 'anthropic', 'gemini']) {
+    for (const provider of ['ollama', 'openai', 'anthropic', 'gemini', 'deepseek']) {
       const response = await post('/api/analyze', { provider, image, consent: true });
       expect(response.status).toBe(502);
     }
@@ -841,6 +850,113 @@ describe('Google Gemini vision (mocked, no paid requests)', () => {
     expect(body).toContain(String(status));
     expect(body).not.toContain('private-google-detail');
     expect(body).not.toContain(config.geminiKey);
+  });
+});
+
+describe('DeepSeek vision (mocked, no paid requests)', () => {
+  const answer = (value: unknown, status = 'completed') => ({
+    status,
+    output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(value) }] }],
+  });
+
+  it('requires consent and a configured key before sending data', async () => {
+    const denied = await post('/api/analyze', { provider: 'deepseek', image, consent: false });
+    expect(denied.status).toBe(400);
+    expect((await denied.json()).error).toContain('DeepSeek');
+    await expect(
+      analyzeCharacter(
+        { ...config, deepseekKey: '' },
+        { provider: 'deepseek', image, direction: '', consent: true },
+        mockFetch,
+      ),
+    ).rejects.toMatchObject({ status: 503, message: expect.stringContaining('DEEPSEEK_API_KEY') });
+    expect(mockFetch).not.toHaveBeenCalled();
+    const caps = await capabilities({ ...config, deepseekKey: '' }, mockFetch);
+    expect(caps.deepseek).toEqual({ ready: false, model: config.deepseekModel });
+  });
+
+  it('sends a sanitized image to DeepSeek with its own key and validates the response', async () => {
+    mockFetch.mockResolvedValue(json(answer(analysis)));
+    const response = await post('/api/analyze', {
+      provider: 'deepseek',
+      image,
+      characterText: '穏やかな司書',
+      consent: true,
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ analysis, provider: 'deepseek' });
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://api.deepseek.com/responses');
+    expect(init?.headers).toMatchObject({ Authorization: `Bearer ${config.deepseekKey}` });
+    const sent = JSON.parse(String(init?.body));
+    expect(sent.model).toBe(config.deepseekModel);
+    expect(sent.reasoning).toEqual({ effort: 'none' });
+    expect(sent.text.format).toMatchObject({ type: 'json_schema', name: 'voice_direction' });
+    expect(sent.input[0].content[1].image_url).toMatch(/^data:image\/jpeg;base64,/);
+    expect(JSON.stringify(sent)).not.toContain(config.deepseekKey);
+  });
+
+  it.each([
+    ['response_shape', { status: 'completed', output: 'broken' }],
+    [
+      'json_parse',
+      {
+        status: 'completed',
+        output: [{ type: 'message', content: [{ type: 'output_text', text: 'broken' }] }],
+      },
+    ],
+    ['schema', answer({ ...analysis, summary: '' })],
+  ])('retries a %s error once and accepts a valid second response', async (stage, payload) => {
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      mockFetch.mockResolvedValueOnce(json(payload)).mockResolvedValueOnce(json(answer(analysis)));
+      const response = await post('/api/analyze', { provider: 'deepseek', image, consent: true });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ analysis, provider: 'deepseek' });
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(warnings).toHaveBeenCalledWith(
+        'DeepSeek analysis validation failed',
+        expect.objectContaining({ attempt: 1, stage }),
+      );
+      expect(JSON.stringify(warnings.mock.calls)).not.toContain(config.deepseekKey);
+      expect(JSON.stringify(warnings.mock.calls)).not.toContain(image);
+    } finally {
+      warnings.mockRestore();
+    }
+  });
+
+  it('stops after two invalid responses and allows a manual retry', async () => {
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      mockFetch.mockResolvedValueOnce(json(answer({ ...analysis, summary: '' })));
+      mockFetch.mockResolvedValueOnce(json(answer({ ...analysis, delivery: '' })));
+      const response = await post('/api/analyze', { provider: 'deepseek', image, consent: true });
+      expect(response.status).toBe(502);
+      expect((await response.json()).error).toContain('自動再試行後も失敗');
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(warnings.mock.calls.map(([, detail]) => detail)).toEqual([
+        expect.objectContaining({ attempt: 1, stage: 'schema' }),
+        expect.objectContaining({ attempt: 2, stage: 'schema' }),
+      ]);
+    } finally {
+      warnings.mockRestore();
+    }
+  });
+
+  it('does not retry incomplete responses or provider errors', async () => {
+    mockFetch.mockResolvedValueOnce(json(answer(analysis, 'incomplete')));
+    expect(
+      (await post('/api/analyze', { provider: 'deepseek', image, consent: true })).status,
+    ).toBe(502);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    mockFetch.mockResolvedValueOnce(json({ error: 'private-deepseek-detail' }, 402));
+    const response = await post('/api/analyze', { provider: 'deepseek', image, consent: true });
+    expect(response.status).toBe(502);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    const body = await response.text();
+    expect(body).toContain('402');
+    expect(body).not.toContain('private-deepseek-detail');
+    expect(body).not.toContain(config.deepseekKey);
   });
 });
 

@@ -6,6 +6,7 @@ const unavailable = {
   openai: { ready: false, model: 'test' },
   anthropic: { ready: false, model: 'test-claude' },
   gemini: { ready: false, model: 'test-gemini' },
+  deepseek: { ready: false, model: 'test-deepseek' },
   voicevox: { ready: false, detail: '未接続' },
 };
 test.beforeEach(async ({ page }) => {
@@ -49,6 +50,7 @@ for (const { provider, label, display } of [
   { provider: 'openai', label: 'OpenAI', display: 'OpenAI' },
   { provider: 'anthropic', label: 'Claude', display: 'Anthropic（Claude）' },
   { provider: 'gemini', label: 'Gemini', display: 'Google（Gemini）' },
+  { provider: 'deepseek', label: 'DeepSeek', display: 'DeepSeek' },
 ]) {
   test(`${label} image analysis requires provider-specific consent`, async ({ page }) => {
     await page.route('**/api/capabilities', (route) =>
@@ -58,6 +60,7 @@ for (const { provider, label, display } of [
           openai: { ready: true, model: 'test-openai' },
           anthropic: { ready: true, model: 'test-claude' },
           gemini: { ready: true, model: 'test-gemini' },
+          deepseek: { ready: true, model: 'test-deepseek' },
         },
       }),
     );
@@ -145,6 +148,19 @@ test('Gemini setup shows how to configure the server key without horizontal over
   await page.getByRole('button', { name: '接続設定を閉じる' }).click();
   await expect(page.getByRole('button', { name: '画像から声の演出案を作る' })).toBeDisabled();
 });
+test('DeepSeek setup shows the server key and configured model', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('radio', { name: 'DeepSeek' }).check();
+  await page.getByRole('button', { name: '接続設定を開く' }).click();
+  const settings = page.getByRole('region', { name: '接続設定' });
+  await expect(settings.getByText('DeepSeek', { exact: true })).toBeVisible();
+  await expect(settings.getByText('DEEPSEEK_API_KEY=…')).toBeVisible();
+  await expect(settings.getByText(/モデル: test-deepseek/)).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+});
+
 test('handles model failure without showing invented analysis', async ({ page }) => {
   await page.route('**/api/capabilities', (route) =>
     route.fulfill({
