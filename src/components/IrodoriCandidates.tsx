@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   irodoriCandidates,
+  irodoriAssignmentsSchema,
   irodoriModel,
   irodoriModelRevision,
+  type IrodoriAssignment,
   type IrodoriVoiceId,
 } from '../../shared/irodori-candidates';
 import { useProject, useProjectPart } from '../lib/project-context';
@@ -14,6 +16,13 @@ export function IrodoriCandidates() {
   const [selected, setSelected] = useState<IrodoriVoiceId[]>(
     initial?.documents.irodoriCandidates ?? [],
   );
+  const [assignments, setAssignments] = useState<IrodoriAssignment[]>(
+    initial?.documents.irodoriAssignments ?? [],
+  );
+  const [editing, setEditing] = useState<string | null>(null);
+  const [character, setCharacter] = useState('');
+  const [voiceId, setVoiceId] = useState<IrodoriVoiceId | ''>('');
+  const [reason, setReason] = useState('');
   const [audio, setAudio] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(true);
   const [message, setMessage] = useState('');
@@ -22,6 +31,7 @@ export function IrodoriCandidates() {
   const urls = useRef<string[]>([]);
 
   useProjectPart('irodoriCandidates', () => selected, busy);
+  useProjectPart('irodoriAssignments', () => assignments, busy);
 
   function setAudioUrls(blobs: Record<string, Blob>) {
     const next = Object.fromEntries(
@@ -93,10 +103,42 @@ export function IrodoriCandidates() {
   }
 
   function toggle(id: IrodoriVoiceId) {
+    if (selected.includes(id) && assignments.some((item) => item.voiceId === id)) {
+      setError('この声には仮配役があります。先に仮配役を変更または削除してください。');
+      return;
+    }
+    setError('');
     setSelected((current) =>
       current.includes(id) ? current.filter((item) => item !== id) : [...current, id],
     );
     setMessage('候補を変更しました。作品を保存すると、選択した声のIDが作品JSONに入ります。');
+  }
+
+  function clearForm() {
+    setEditing(null);
+    setCharacter('');
+    setVoiceId('');
+    setReason('');
+  }
+
+  function saveAssignment() {
+    try {
+      const item = { character, voiceId, reason };
+      if (!selected.includes(item.voiceId as IrodoriVoiceId))
+        throw new Error('作品の候補に保存した声を選んでください。');
+      const parsed = irodoriAssignmentsSchema.safeParse([
+        ...assignments.filter((entry) => entry.character !== editing),
+        item,
+      ]);
+      if (!parsed.success)
+        throw new Error(parsed.error.issues[0]?.message ?? '仮配役を保存できませんでした。');
+      setAssignments(parsed.data);
+      clearForm();
+      setError('');
+      setMessage('仮配役を更新しました。作品を保存すると記録されます。');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '仮配役を保存できませんでした。');
+    }
   }
 
   return (
@@ -170,6 +212,113 @@ export function IrodoriCandidates() {
         ))}
       </div>
       <p role="status">この作品の候補：{selected.length}件 / 3件</p>
+      <section className="irodori-assignments" aria-label="Irodoriの仮配役">
+        <h3>キャラクターへの仮配役</h3>
+        <p>
+          作品の候補声をキャラクターに結び付け、理由とともに記録します。台本の音声生成にはまだ使いません。
+        </p>
+        <div className="irodori-assignment-list">
+          {assignments.length === 0 && <p>仮配役はまだありません。</p>}
+          {assignments.map((item) => {
+            const voice = irodoriCandidates.find((candidate) => candidate.id === item.voiceId)!;
+            const sample = voice.samples[0];
+            return (
+              <article key={item.character}>
+                <h4>
+                  {item.character}：{voice.name}
+                </h4>
+                {item.reason && <p>理由：{item.reason}</p>}
+                {audio[sample.sha256] ? (
+                  <audio
+                    controls
+                    src={audio[sample.sha256]}
+                    onPlay={pauseOtherAudio}
+                    aria-label={`${item.character}の仮配役音声`}
+                  />
+                ) : (
+                  <p>試聴音声は未読み込みです。</p>
+                )}
+                <div className="casting-actions">
+                  <button
+                    className="secondary-button"
+                    disabled={busy}
+                    onClick={() => {
+                      setEditing(item.character);
+                      setCharacter(item.character);
+                      setVoiceId(item.voiceId);
+                      setReason(item.reason);
+                      setError('');
+                    }}
+                  >
+                    編集
+                  </button>
+                  <button
+                    className="secondary-button"
+                    disabled={busy}
+                    onClick={() => {
+                      setAssignments((current) =>
+                        current.filter((entry) => entry.character !== item.character),
+                      );
+                      if (editing === item.character) clearForm();
+                      setMessage('仮配役を削除しました。作品を保存すると反映されます。');
+                    }}
+                  >
+                    削除
+                  </button>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+        <fieldset disabled={busy || selected.length === 0}>
+          <legend>{editing ? '仮配役を編集' : '仮配役を追加'}</legend>
+          <label>
+            キャラクター名
+            <input
+              aria-label="仮配役のキャラクター名"
+              maxLength={100}
+              value={character}
+              onChange={(event) => setCharacter(event.target.value)}
+            />
+          </label>
+          <label>
+            候補声
+            <select
+              aria-label="仮配役の候補声"
+              value={voiceId}
+              onChange={(event) => setVoiceId(event.target.value as IrodoriVoiceId | '')}
+            >
+              <option value="">声を選択</option>
+              {irodoriCandidates
+                .filter((voice) => selected.includes(voice.id))
+                .map((voice) => (
+                  <option key={voice.id} value={voice.id}>
+                    {voice.name}
+                  </option>
+                ))}
+            </select>
+          </label>
+          <label>
+            採用理由・メモ
+            <textarea
+              aria-label="仮配役の理由"
+              maxLength={500}
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+            />
+          </label>
+          <div className="casting-actions">
+            <button disabled={!character.trim() || !voiceId} onClick={saveAssignment}>
+              {editing ? '仮配役を更新' : '仮配役を保存'}
+            </button>
+            {editing && (
+              <button className="secondary-button" onClick={clearForm}>
+                編集を取り消す
+              </button>
+            )}
+          </div>
+        </fieldset>
+      </section>
       <small>
         モデル：{irodoriModel}（リビジョン {irodoriModelRevision}）
       </small>

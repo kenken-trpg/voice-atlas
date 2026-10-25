@@ -8,6 +8,21 @@ export const irodoriSelectionSchema = z
   .max(3)
   .refine((ids) => new Set(ids).size === ids.length, '同じ声を重複して保存できません。');
 
+export const irodoriAssignmentsSchema = z
+  .array(
+    z.object({
+      character: z.string().trim().min(1).max(100),
+      voiceId: irodoriVoiceIdSchema,
+      reason: z.string().trim().max(500),
+    }),
+  )
+  .max(30)
+  .refine(
+    (items) => new Set(items.map((item) => item.character)).size === items.length,
+    '同じキャラクターを重複して仮配役できません。',
+  );
+export type IrodoriAssignment = z.infer<typeof irodoriAssignmentsSchema>[number];
+
 export const irodoriCandidates = [
   {
     id: 'old_mage',

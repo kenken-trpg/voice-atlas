@@ -2549,8 +2549,40 @@ footer small {
   border-radius: 0.75rem;
 }
 
-.irodori-candidate-card audio {
+.irodori-candidate-card audio,
+.irodori-assignment-list audio {
   display: block;
   width: 100%;
   margin: 0.4rem 0 1rem;
+}
+
+.irodori-assignments {
+  margin: 1.5rem 0;
+}
+
+.irodori-assignment-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 1rem;
+  margin: 1rem 0;
+}
+
+.irodori-assignment-list article {
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--border, #d8d8d8);
+  border-radius: 0.75rem;
+}
+
+.irodori-assignments fieldset label {
+  display: block;
+  margin: 0.75rem 0;
+}
+
+.irodori-assignments fieldset input,
+.irodori-assignments fieldset select,
+.irodori-assignments fieldset textarea {
+  display: block;
+  width: 100%;
+  max-width: 36rem;
 }
