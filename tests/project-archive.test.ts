@@ -12,6 +12,7 @@ import { scriptAudioKey } from '../shared/script';
 import { makeScriptLibraryEntry } from '../shared/script-library';
 import { projectFixture } from './fixtures/project';
 import { pcmWav } from './fixtures/wav';
+import { irodoriCandidates } from '../shared/irodori-candidates';
 
 function fixture() {
   const project = projectFixture();
@@ -79,6 +80,25 @@ describe('portable project audio archive', () => {
     expect(result.project).toEqual(project);
     expect(await blob.text()).not.toContain('synthetic-do-not-copy');
   });
+  it('reads existing v1 archives and rejects Irodori audio not selected in the project', async () => {
+    const { project, audio } = fixture();
+    const { header, tail } = await unpack(await createProjectArchive(project, audio));
+    header.version = 1;
+    delete header.irodoriAudio;
+    const legacy = await parseProjectArchive(pack(header, tail));
+    expect(legacy.audio).toHaveLength(1);
+    expect(legacy.irodoriAudio).toEqual([]);
+
+    header.version = 2;
+    header.irodoriAudio = [{ sha256: irodoriCandidates[0].samples[0].sha256, bytes: 12 }];
+    await expect(parseProjectArchive(pack(header, tail))).rejects.toThrow('一致');
+    project.documents.irodoriCandidates = ['old_mage'];
+    await expect(
+      createProjectArchive(project, [], undefined, [
+        { sha256: irodoriCandidates[1].samples[0].sha256, blob: new Blob([pcmWav([1])]) },
+      ]),
+    ).rejects.toThrow('一致');
+  });
   it('binds a cached condition to a saved script even when the editing script has changed the same row ID', async () => {
     const { project, audio } = fixture();
     project.documents.scriptLibrary.entries = [
@@ -126,7 +146,7 @@ describe('portable project audio archive', () => {
     const { header, tail } = await unpack(await createProjectArchive(project, audio));
     for (const change of [
       (h: typeof header) => {
-        h.version = 2;
+        h.version = 3;
       },
       (h: typeof header) => {
         h.project.documents.script.lines.push(h.project.documents.script.lines[0]);

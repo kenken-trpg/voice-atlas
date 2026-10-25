@@ -9,6 +9,8 @@ import {
   projectArchiveLines,
 } from '../shared/project-archive';
 import { makeScriptLibraryEntry } from '../shared/script-library';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 function fixture() {
   const project = projectFixture();
@@ -207,6 +209,67 @@ test('exports saved WAVs and restores into a clean offline browser without gener
     await scriptPanel(other);
     await expect(script.locator(':scope > ol audio')).toHaveCount(2);
     expect(target.calls()).toBe(0);
+  } finally {
+    await fresh.close();
+  }
+});
+
+test('carries selected Irodori samples to a new browser and plays them after reload', async ({
+  page,
+  browser,
+}) => {
+  test.skip(
+    !existsSync(
+      resolve(
+        '.local-artifacts/irodori-v41-voice-design-20261024/sample_20261024_074100_778062_001.wav',
+      ),
+    ),
+  );
+  await page.goto('/');
+  const voices = page.getByRole('region', { name: 'Irodori生成済みの声を比較' });
+  await voices.getByRole('button', { name: 'この端末の検証音声を読み込む' }).click();
+  await expect(voices.locator('audio')).toHaveCount(6);
+  await voices.getByRole('button', { name: '作品の候補に保存' }).first().click();
+  await page.getByText('作品を保存・復元する', { exact: true }).click();
+  const event = page.waitForEvent('download');
+  await page.getByRole('button', { name: '音声付き作品アーカイブを書き出す' }).click();
+  const buffer = await bytes(await event);
+  const parsed = await parseProjectArchive(new Blob([buffer]));
+  expect(parsed.project.documents.irodoriCandidates).toEqual(['old_mage']);
+  expect(parsed.irodoriAudio).toHaveLength(2);
+  const fresh = await browser.newContext();
+  try {
+    const other = await fresh.newPage();
+    await other.goto('/');
+    await other.getByText('作品を保存・復元する', { exact: true }).click();
+    const damaged = Buffer.from(buffer);
+    damaged[damaged.length - 1] ^= 1;
+    await inspect(other, damaged);
+    const archive = other.getByRole('region', { name: '音声付き作品アーカイブ' });
+    await expect(archive.getByRole('alert')).toContainText('Irodoriの候補音声が破損');
+    await inspect(other, buffer);
+    await expect(archive.getByRole('group', { name: '音声付き作品の復元確認' })).toContainText(
+      'Irodori候補音声2件',
+    );
+    await other.evaluate((key) => {
+      const original = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (name, value) {
+        if (name === key) throw new DOMException('full', 'QuotaExceededError');
+        original.call(this, name, value);
+      };
+    }, projectLibraryStorageKey);
+    await archive.getByRole('button', { name: '確認した音声付き作品を復元' }).click();
+    await expect(archive.getByRole('alert')).toContainText('保存容量');
+    await other.reload();
+    const restored = other.getByRole('region', { name: 'Irodori生成済みの声を比較' });
+    await expect(restored.locator('audio')).toHaveCount(0);
+    await other.getByText('作品を保存・復元する', { exact: true }).click();
+    await inspect(other, buffer);
+    await archive.getByRole('button', { name: '確認した音声付き作品を復元' }).click();
+    await expect(restored.locator('audio')).toHaveCount(2);
+    await other.reload();
+    await expect(restored.locator('audio')).toHaveCount(2);
+    await expect(restored.getByText('この作品の候補：1件 / 3件')).toBeVisible();
   } finally {
     await fresh.close();
   }
@@ -423,7 +486,7 @@ test('rejects corrupt audio and refuses restoration after another tab updates th
   const unsupported = await archiveFile();
   const headerLength = unsupported.readUInt32LE(8);
   const header = JSON.parse(unsupported.toString('utf8', 12, 12 + headerLength));
-  header.version = 2;
+  header.version = 3;
   Buffer.from(JSON.stringify(header)).copy(unsupported, 12);
   await inspect(page, unsupported);
   await expect(archive.getByRole('alert')).toContainText('形式・版');

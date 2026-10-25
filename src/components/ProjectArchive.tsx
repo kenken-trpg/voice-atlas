@@ -9,6 +9,8 @@ import {
 } from '../../shared/project';
 import { type ProjectArchive as Archive } from '../../shared/project-archive';
 import { maxSavedAudioBytes, maxSavedAudioEntries } from '../../shared/script-audio-cache';
+import { irodoriCandidates } from '../../shared/irodori-candidates';
+import { readIrodoriAudio } from '../lib/irodori-audio-store';
 
 type AudioUsage = { bytes: number; entries: number };
 const toMiB = (bytes: number) => (bytes / 1024 ** 2).toFixed(2);
@@ -42,12 +44,22 @@ export function ProjectArchive({
   };
   const baseline = useRef<string | null>(null);
   useEffect(() => {
-    try {
-      baseline.current = signature();
-    } catch {
-      /* A busy workspace is checked again on action. */
-    }
-    return () => controller.current?.abort();
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const captureBaseline = () => {
+      if (baseline.current !== null) return;
+      try {
+        baseline.current = signature();
+        if (timer) clearInterval(timer);
+      } catch {
+        /* Initial audio loading can temporarily block a workspace snapshot. */
+      }
+    };
+    captureBaseline();
+    if (baseline.current === null) timer = setInterval(captureBaseline, 50);
+    return () => {
+      if (timer) clearInterval(timer);
+      controller.current?.abort();
+    };
   }, []);
   useEffect(() => {
     onLockChange(busy || pending !== null);
@@ -90,7 +102,18 @@ export function ProjectArchive({
         ]);
       request.signal.throwIfAborted();
       const audio = await loadScriptAudio(project.id, projectArchiveLines(project));
-      const blob = await createProjectArchive(project, audio, request.signal);
+      const savedIrodori = await readIrodoriAudio();
+      const selectedIrodori = new Set<string>(project.documents.irodoriCandidates);
+      const irodoriAudio = irodoriCandidates.flatMap((voice) =>
+        selectedIrodori.has(voice.id)
+          ? voice.samples.flatMap((sample) =>
+              savedIrodori[sample.sha256]
+                ? [{ sha256: sample.sha256, blob: savedIrodori[sample.sha256] }]
+                : [],
+            )
+          : [],
+      );
+      const blob = await createProjectArchive(project, audio, request.signal, irodoriAudio);
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = url;
@@ -98,7 +121,7 @@ export function ProjectArchive({
       anchor.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       setNotice(
-        `作品設定と保存音声${audio.length}行を書き出しました。ブラウザ未保存・条件不一致の音声は含みません。`,
+        `作品設定、保存音声${audio.length}行、Irodori候補音声${irodoriAudio.length}件を書き出しました。ブラウザ未保存・条件不一致の音声は含みません。`,
       );
     });
   }
@@ -207,10 +230,10 @@ export function ProjectArchive({
     <section aria-label="音声付き作品アーカイブ" className="project-archive">
       <h3>音声も一緒に持ち運ぶ</h3>
       <p>
-        作品設定と、この作品の台本・保存台本に条件が一致するブラウザ保存済みの音声を、一つのファイルにまとめます。音声を含めるには、先に作品と台本音声をブラウザに保存してください。画像・APIキー・未保存の試聴音声・結合WAVは含みません。
+        作品設定、台本・保存台本に条件が一致する保存音声、この作品で選んだIrodori候補のブラウザ保存済みWAVを一つのファイルにまとめます。音声を含めるには先にブラウザへ保存してください。画像・APIキー・未保存の試聴音声・結合WAVは含みません。
       </p>
       <p>
-        読み込み時は内容を確認し、新しい作品として追加します。音声は1行20MiB・合計64MiB、アーカイブ全体は100MiBまでです。このブラウザの全作品で保存音声128MiB・1000行の上限も適用します。
+        読み込み時は内容を確認し、新しい作品として追加します。台本音声は1行20MiB・合計64MiB、Irodori候補音声は1件4MiB、アーカイブ全体は100MiBまでです。このブラウザの全作品で台本の保存音声128MiB・1000行の上限も適用します。
       </p>
       <div className="casting-actions">
         <button
@@ -254,6 +277,8 @@ export function ProjectArchive({
           <p>
             保存音声{pending.audio.length}行・
             {toMiB(incomingBytes)}
+            MiB、Irodori候補音声{pending.irodoriAudio.length}件・
+            {toMiB(pending.irodoriAudio.reduce((sum, item) => sum + item.blob.size, 0))}
             MiB。音声のない行は、復元後に生成してください。
           </p>
           {usage && (

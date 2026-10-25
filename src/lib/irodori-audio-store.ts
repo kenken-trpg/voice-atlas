@@ -69,3 +69,22 @@ export async function saveIrodoriAudio(files: File[]): Promise<number> {
   }
   return accepted.length;
 }
+
+export async function deleteIrodoriAudio(hashes: string[]): Promise<void> {
+  if (!hashes.length) return;
+  const db = await openDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(storeName, 'readwrite');
+      const store = transaction.objectStore(storeName);
+      for (const hash of hashes) store.delete(hash);
+      transaction.oncomplete = () => resolve();
+      transaction.onabort = () =>
+        reject(transaction.error ?? new Error('音声を削除できませんでした。'));
+      transaction.onerror = () =>
+        reject(transaction.error ?? new Error('音声を削除できませんでした。'));
+    });
+  } finally {
+    db.close();
+  }
+}
