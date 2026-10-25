@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { irodoriSelectionSchema } from './irodori-candidates';
 import { pronunciationsSchema } from './pronunciations';
 import { characterInputSchema, profileSchema } from './schema';
 import { parseSavedRecipe } from './saved-recipe';
@@ -57,6 +58,7 @@ const projectSchema = z.object({
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   documents: z.object({
+    irodoriCandidates: irodoriSelectionSchema.default([]),
     pronunciations: pronunciationsSchema.default([]),
     workbench: workbenchSchema.nullable(),
     casting: castingWorkSchema.nullable(),
@@ -277,6 +279,7 @@ export function legacyDocuments(storage: ProjectStorage): ProjectDocuments {
   const script = storage.getItem(scriptStorageKey);
   const scripts = storage.getItem(scriptLibraryStorageKey);
   return {
+    irodoriCandidates: [],
     workbench: null,
     pronunciations: [],
     casting: null,
@@ -291,7 +294,7 @@ export function legacyDocuments(storage: ProjectStorage): ProjectDocuments {
 }
 export function projectSummary(project: VoiceProject) {
   const d = project.documents;
-  return `採用声${d.voiceLibrary.entries.length}件・配役${d.castingBoard.assignments.length}件・保存台本${d.scriptLibrary.entries.length}件・編集中の台本${d.script?.lines.length ?? 0}行`;
+  return `採用声${d.voiceLibrary.entries.length}件・Irodori候補${d.irodoriCandidates.length}件・配役${d.castingBoard.assignments.length}件・保存台本${d.scriptLibrary.entries.length}件・編集中の台本${d.script?.lines.length ?? 0}行`;
 }
 
 // A project occupies one storage item, so switching and saving never partially replace

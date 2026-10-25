@@ -29,6 +29,25 @@ function storage() {
   };
 }
 describe('project backups and atomic browser storage', () => {
+  it('saves Irodori candidate choices and loads older projects with none selected', () => {
+    const project = projectFixture();
+    project.documents.irodoriCandidates = ['old_mage', 'male_ai'];
+    expect(parseProject(serializeProject(project)).documents.irodoriCandidates).toEqual([
+      'old_mage',
+      'male_ai',
+    ]);
+    const old = JSON.parse(serializeProject(project));
+    delete old.documents.irodoriCandidates;
+    expect(parseProject(JSON.stringify(old)).documents.irodoriCandidates).toEqual([]);
+    expect(() =>
+      parseProject(
+        JSON.stringify({
+          ...project,
+          documents: { ...project.documents, irodoriCandidates: ['old_mage', 'old_mage'] },
+        }),
+      ),
+    ).toThrow();
+  });
   it('prevents another tab from overwriting a changed project and retains its own snapshot for backup', () => {
     const store = storage();
     const project = projectFixture();

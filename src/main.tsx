@@ -56,6 +56,7 @@ import { jsonRequest, download } from './lib/http';
 import { ProjectProvider, useProject, useProjectPart } from './lib/project-context';
 import { ProjectPanel } from './components/ProjectPanel';
 import { ConnectionGuide } from './components/ConnectionGuide';
+import { IrodoriCandidates } from './components/IrodoriCandidates';
 import './styles.css';
 
 type Mode = 'manual' | Provider;
@@ -666,6 +667,7 @@ function App() {
           onBusyChange={setGuideBusy}
         />
         <ProjectPanel />
+        <IrodoriCandidates />
         <div className="recipe-import">
           <button
             className="secondary-button"
