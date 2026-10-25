@@ -1063,6 +1063,7 @@ export function VoiceScript({
                   第{index + 1}行{generatingId === line.id ? ' · 生成中' : ''}
                   {playingId === line.id ? ' · 連続試聴中' : ''}
                 </strong>
+                {line.character && <p>発話者：{line.character}</p>}
                 <label>
                   発話者名
                   <input
