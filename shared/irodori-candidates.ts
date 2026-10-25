@@ -41,6 +41,20 @@ export const irodoriComparisonsSchema = z
   );
 export type IrodoriComparison = z.infer<typeof irodoriComparisonsSchema>[number];
 
+export const irodoriSpeakerLinksSchema = z
+  .array(
+    z.object({
+      speaker: z.string().trim().min(1).max(100),
+      character: z.string().trim().min(1).max(100),
+    }),
+  )
+  .max(30)
+  .refine(
+    (items) => new Set(items.map((item) => item.speaker)).size === items.length,
+    '同じ発話者の対応付けを重複して保存できません。',
+  );
+export type IrodoriSpeakerLink = z.infer<typeof irodoriSpeakerLinksSchema>[number];
+
 export const irodoriCandidates = [
   {
     id: 'old_mage',

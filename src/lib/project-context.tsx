@@ -6,6 +6,8 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type Dispatch,
+  type SetStateAction,
 } from 'react';
 import {
   legacyDocuments,
@@ -22,6 +24,7 @@ import {
   type ProjectPart,
 } from '../../shared/project';
 import { pronunciationsSchema, type Pronunciation } from '../../shared/pronunciations';
+import { type IrodoriAssignment } from '../../shared/irodori-candidates';
 
 type Source = { snapshot: () => unknown; busy: () => boolean };
 type Context = {
@@ -34,6 +37,10 @@ type Context = {
   transition: (action: ProjectLibraryAction, current?: VoiceProject) => void;
   pronunciations: Pronunciation[];
   setPronunciations: (rules: Pronunciation[]) => void;
+  irodoriAssignments: IrodoriAssignment[];
+  setIrodoriAssignments: Dispatch<SetStateAction<IrodoriAssignment[]>>;
+  irodoriAudioRevision: number;
+  refreshIrodoriAudio: () => void;
 };
 const ProjectContext = createContext<Context | null>(null);
 export function useProject() {
@@ -75,6 +82,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   });
   const [initial, setInitial] = useState(loaded.project);
   const [pronunciations, setReadings] = useState(loaded.project?.documents.pronunciations ?? []);
+  const [irodoriAssignments, setIrodoriAssignments] = useState<IrodoriAssignment[]>(
+    loaded.project?.documents.irodoriAssignments ?? [],
+  );
+  const [irodoriAudioRevision, setIrodoriAudioRevision] = useState(0);
   const [loadError, setLoadError] = useState(loaded.error);
   const [revision, setRevision] = useState(0);
   const sources = useRef(new Map<ProjectPart, Source>());
@@ -107,6 +118,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setLoadError('');
     if (remount) {
       setReadings(project.documents.pronunciations);
+      setIrodoriAssignments(project.documents.irodoriAssignments);
+      setIrodoriAudioRevision((value) => value + 1);
       setInitial(project);
       setRevision((value) => value + 1);
     }
@@ -125,6 +138,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setLoadError('');
     if (action.type === 'open' || action.type === 'select' || previousId !== next?.id) {
       setReadings(next?.documents.pronunciations ?? []);
+      setIrodoriAssignments(next?.documents.irodoriAssignments ?? []);
+      setIrodoriAudioRevision((value) => value + 1);
       setInitial(next);
       setRevision((value) => value + 1);
     }
@@ -141,6 +156,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         transition,
         pronunciations,
         setPronunciations: (rules) => setReadings(pronunciationsSchema.parse(rules)),
+        irodoriAssignments,
+        setIrodoriAssignments,
+        irodoriAudioRevision,
+        refreshIrodoriAudio: () => setIrodoriAudioRevision((value) => value + 1),
       }}
     >
       <Fragment key={revision}>{children}</Fragment>

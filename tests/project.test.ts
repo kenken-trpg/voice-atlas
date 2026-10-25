@@ -115,6 +115,30 @@ describe('project backups and atomic browser storage', () => {
       ),
     ).toThrow();
   });
+  it('keeps explicit Irodori speaker links in projects and defaults old projects to none', () => {
+    const project = projectFixture();
+    project.documents.irodoriSpeakerLinks = [{ speaker: 'ナレーター', character: '長老' }];
+    expect(parseProject(serializeProject(project)).documents.irodoriSpeakerLinks).toEqual(
+      project.documents.irodoriSpeakerLinks,
+    );
+    const old = JSON.parse(serializeProject(project));
+    delete old.documents.irodoriSpeakerLinks;
+    expect(parseProject(JSON.stringify(old)).documents.irodoriSpeakerLinks).toEqual([]);
+    expect(() =>
+      parseProject(
+        JSON.stringify({
+          ...project,
+          documents: {
+            ...project.documents,
+            irodoriSpeakerLinks: [
+              ...project.documents.irodoriSpeakerLinks,
+              ...project.documents.irodoriSpeakerLinks,
+            ],
+          },
+        }),
+      ),
+    ).toThrow();
+  });
   it('prevents another tab from overwriting a changed project and retains its own snapshot for backup', () => {
     const store = storage();
     const project = projectFixture();

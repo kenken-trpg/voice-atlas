@@ -4,7 +4,6 @@ import {
   irodoriAssignmentsSchema,
   irodoriModel,
   irodoriModelRevision,
-  type IrodoriAssignment,
   type IrodoriComparison as IrodoriComparisonRecord,
   type IrodoriVoiceId,
 } from '../../shared/irodori-candidates';
@@ -14,12 +13,14 @@ import { pauseOtherAudio } from './ComparisonPanel';
 import { IrodoriComparison } from './IrodoriComparison';
 
 export function IrodoriCandidates() {
-  const { initial } = useProject();
+  const {
+    initial,
+    irodoriAssignments: assignments,
+    setIrodoriAssignments: setAssignments,
+    refreshIrodoriAudio,
+  } = useProject();
   const [selected, setSelected] = useState<IrodoriVoiceId[]>(
     initial?.documents.irodoriCandidates ?? [],
-  );
-  const [assignments, setAssignments] = useState<IrodoriAssignment[]>(
-    initial?.documents.irodoriAssignments ?? [],
   );
   const [comparisons, setComparisons] = useState<IrodoriComparisonRecord[]>(
     initial?.documents.irodoriComparisons ?? [],
@@ -76,6 +77,7 @@ export function IrodoriCandidates() {
     try {
       const count = await saveIrodoriAudio(Array.from(files));
       setAudioUrls(await readIrodoriAudio());
+      refreshIrodoriAudio();
       setMessage(`${count}件の音声をブラウザに保存しました。`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '音声を読み込めませんでした。');
@@ -100,6 +102,7 @@ export function IrodoriCandidates() {
       }
       const count = await saveIrodoriAudio(files);
       setAudioUrls(await readIrodoriAudio());
+      refreshIrodoriAudio();
       setMessage(`${count}件の検証音声をブラウザに保存しました。`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '検証音声を読み込めませんでした。');

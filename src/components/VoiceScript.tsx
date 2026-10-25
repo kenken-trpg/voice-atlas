@@ -4,7 +4,13 @@ import {
   readWorkspaceProject,
 } from '../../shared/project';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { useProjectPart } from '../lib/project-context';
+import { useProject, useProjectPart } from '../lib/project-context';
+import {
+  irodoriCandidates,
+  irodoriSpeakerLinksSchema,
+  type IrodoriSpeakerLink,
+} from '../../shared/irodori-candidates';
+import { readIrodoriAudio } from '../lib/irodori-audio-store';
 import { type CastingAssignment } from '../../shared/casting-board';
 import {
   emptyScript,
@@ -69,6 +75,12 @@ export function VoiceScript({
   currentModel: (candidate: CastingCandidate) => AivisModelInfo | undefined;
   onBusyChange: (busy: boolean) => void;
 }) {
+  const { initial: projectInitial, irodoriAssignments, irodoriAudioRevision } = useProject();
+  const [speakerLinks, setSpeakerLinks] = useState<IrodoriSpeakerLink[]>(
+    projectInitial?.documents.irodoriSpeakerLinks ?? [],
+  );
+  const [irodoriUrls, setIrodoriUrls] = useState<Record<string, string>>({});
+  const [irodoriError, setIrodoriError] = useState('');
   const [initial] = useState(() => {
     try {
       const raw = readWorkspaceDocument(scriptStorageKey);
@@ -120,6 +132,65 @@ export function VoiceScript({
   const baseLocked = disabled || busy || loading || exporting || cacheBusy;
   const locked = baseLocked || switching;
   useProjectPart('script', () => script, locked);
+  useProjectPart('irodoriSpeakerLinks', () => speakerLinks, locked);
+  useEffect(() => {
+    if (!active || !opened) {
+      setIrodoriUrls({});
+      return;
+    }
+    let current = true;
+    let urls: string[] = [];
+    setIrodoriUrls({});
+    readIrodoriAudio()
+      .then((blobs) => {
+        if (!current) return;
+        const next = Object.fromEntries(
+          Object.entries(blobs).map(([hash, blob]) => [hash, URL.createObjectURL(blob)]),
+        );
+        urls = Object.values(next);
+        setIrodoriUrls(next);
+        setIrodoriError('');
+      })
+      .catch(() => {
+        if (current) setIrodoriError('Irodoriの保存済み音声を読み込めませんでした。');
+      });
+    return () => {
+      current = false;
+      urls.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [active, opened, irodoriAudioRevision]);
+  function irodoriForSpeaker(speaker: string) {
+    const explicit = speakerLinks.find((item) => item.speaker === speaker);
+    return irodoriAssignments.find((item) => item.character === (explicit?.character ?? speaker));
+  }
+  function irodoriUrl(voiceId: string) {
+    const sample = irodoriCandidates.find((voice) => voice.id === voiceId)?.samples[0];
+    return sample ? irodoriUrls[sample.sha256] : undefined;
+  }
+  function linkSpeaker(speaker: string, character: string) {
+    const result = irodoriSpeakerLinksSchema.safeParse([
+      ...speakerLinks.filter((item) => item.speaker !== speaker),
+      ...(character ? [{ speaker, character }] : []),
+    ]);
+    if (!result.success) {
+      setIrodoriError(
+        result.error.issues[0]?.message ?? '発話者の対応付けを保存できませんでした。',
+      );
+      return;
+    }
+    setSpeakerLinks(result.data);
+    setIrodoriError('');
+  }
+  const scriptSpeakers = [
+    ...new Set(
+      script.lines
+        .map((line) => line.character?.trim())
+        .filter((name): name is string => Boolean(name)),
+    ),
+  ];
+  const linkedSpeakers = [
+    ...new Set([...scriptSpeakers, ...speakerLinks.map((item) => item.speaker)]),
+  ];
   function stop() {
     queue.current = [];
     setPlayingId(null);
@@ -868,6 +939,51 @@ export function VoiceScript({
             onBusyChange(value);
           }}
         />
+        <section className="irodori-script-links" aria-label="台本発話者とIrodori仮配役">
+          <h4>発話者のIrodori仮配役を確認</h4>
+          <p>
+            発話者名と仮配役のキャラクター名が一致すれば自動で表示します。別名の場合はここで対応付けます。検証音声の試聴用で、この台詞の音声生成には使いません。
+          </p>
+          {irodoriError && <p role="alert">{irodoriError}</p>}
+          {linkedSpeakers.length === 0 && <p>発話者名付きの台本を取り込むと対応付けできます。</p>}
+          {linkedSpeakers.map((speaker) => {
+            const link = speakerLinks.find((item) => item.speaker === speaker);
+            const assignment = irodoriForSpeaker(speaker);
+            return (
+              <div key={speaker}>
+                <label>
+                  {speaker}の仮配役
+                  <select
+                    aria-label={`${speaker}のIrodori仮配役`}
+                    disabled={locked}
+                    value={link?.character ?? ''}
+                    onChange={(event) => linkSpeaker(speaker, event.target.value)}
+                  >
+                    <option value="">名前の一致で自動対応</option>
+                    {link &&
+                      !irodoriAssignments.some((item) => item.character === link.character) && (
+                        <option value={link.character}>
+                          仮配役が見つかりません：{link.character}
+                        </option>
+                      )}
+                    {irodoriAssignments.map((item) => (
+                      <option key={item.character} value={item.character}>
+                        {item.character}：
+                        {irodoriCandidates.find((voice) => voice.id === item.voiceId)!.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <span>
+                  {assignment
+                    ? `表示中：${irodoriCandidates.find((voice) => voice.id === assignment.voiceId)!.name}`
+                    : '対応する仮配役なし'}
+                  {scriptSpeakers.includes(speaker) ? '' : '（現在の台本には発話者なし）'}
+                </span>
+              </div>
+            );
+          })}
+        </section>
         <ol className="evaluation-history">
           {script.lines.map((line, index) => {
             const candidate = scriptCandidate(line),
@@ -880,6 +996,31 @@ export function VoiceScript({
                   {playingId === line.id ? ' · 連続試聴中' : ''}
                 </strong>
                 {line.character && <p>発話者：{line.character}</p>}
+                {line.character &&
+                  (() => {
+                    const assignment = irodoriForSpeaker(line.character.trim());
+                    if (!assignment) return null;
+                    const voice = irodoriCandidates.find((item) => item.id === assignment.voiceId)!;
+                    const url = irodoriUrl(assignment.voiceId);
+                    return (
+                      <div className="irodori-script-preview">
+                        <p>
+                          Irodori仮配役：{assignment.character} → {voice.name}
+                          （保存済み検証音声の試聴のみ）
+                        </p>
+                        {url ? (
+                          <audio
+                            controls
+                            src={url}
+                            onPlay={pauseOtherAudio}
+                            aria-label={`第${index + 1}行のIrodori仮配役音声`}
+                          />
+                        ) : (
+                          <p>試聴音声は未読み込みです。</p>
+                        )}
+                      </div>
+                    );
+                  })()}
                 <label>
                   キャラクターと場面
                   <select
