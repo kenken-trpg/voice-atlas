@@ -44,6 +44,11 @@ test('shows matching provisional voices on script rows and saves explicit speake
   await links.getByRole('combobox', { name: 'ナレーターのIrodori仮配役' }).selectOption('長老');
   await expect(second).toContainText('Irodori仮配役：長老 → 老魔術師');
   await expect(second.locator('audio[aria-label="第2行のIrodori仮配役音声"]')).toBeVisible();
+  await links.getByRole('combobox', { name: '一括改名する発話者' }).selectOption('ナレーター');
+  await links.getByRole('textbox', { name: '一括改名後の発話者名' }).fill('案内役');
+  await links.getByRole('button', { name: '1行の発話者名を変更' }).click();
+  await expect(second.getByLabel('第2行の発話者名')).toHaveValue('案内役');
+  await expect(links.getByRole('combobox', { name: '案内役のIrodori仮配役' })).toHaveValue('長老');
   await voices.getByRole('button', { name: '編集', exact: true }).click();
   await voices.getByRole('combobox', { name: '仮配役の候補声' }).selectOption('executive');
   await voices.getByRole('button', { name: '仮配役を更新' }).click();
@@ -56,7 +61,5 @@ test('shows matching provisional voices on script rows and saves explicit speake
   await page.getByText('台本を作成・試聴する', { exact: true }).click();
   await expect(first).toContainText('Irodori仮配役：長老 → 企業幹部');
   await expect(second).toContainText('Irodori仮配役：長老 → 企業幹部');
-  await expect(links.getByRole('combobox', { name: 'ナレーターのIrodori仮配役' })).toHaveValue(
-    '長老',
-  );
+  await expect(links.getByRole('combobox', { name: '案内役のIrodori仮配役' })).toHaveValue('長老');
 });

@@ -2618,6 +2618,20 @@ footer small {
   max-width: 100%;
 }
 
+.irodori-script-links fieldset {
+  margin: 1rem 0;
+}
+
+.irodori-script-links fieldset label {
+  display: block;
+  margin: 0.5rem 0;
+}
+
+.irodori-script-links fieldset input {
+  display: block;
+  width: min(100%, 28rem);
+}
+
 .irodori-script-preview audio {
   display: block;
   width: min(100%, 32rem);

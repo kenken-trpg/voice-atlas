@@ -247,6 +247,12 @@ test('carries selected Irodori samples to a new browser and plays them after rel
   await comparison.getByRole('checkbox', { name: '企業幹部' }).check();
   await comparison.getByRole('textbox', { name: 'Irodoriの比較メモ' }).fill('落ち着いた声');
   await comparison.getByRole('button', { name: 'この声に仮配役' }).first().click();
+  const sourceScript = await scriptPanel(page);
+  await sourceScript
+    .getByRole('combobox', { name: '一括改名する発話者' })
+    .selectOption('ナレーター');
+  await sourceScript.getByRole('textbox', { name: '一括改名後の発話者名' }).fill('案内役');
+  await sourceScript.getByRole('button', { name: '1行の発話者名を変更' }).click();
   await page.getByText('作品を保存・復元する', { exact: true }).click();
   const event = page.waitForEvent('download');
   await page.getByRole('button', { name: '音声付き作品アーカイブを書き出す' }).click();
@@ -260,8 +266,9 @@ test('carries selected Irodori samples to a new browser and plays them after rel
     { character: '長老', voiceId: 'old_mage', reason: '落ち着いた声' },
   ]);
   expect(parsed.project.documents.irodoriSpeakerLinks).toEqual([
-    { speaker: 'ナレーター', character: '長老' },
+    { speaker: '案内役', character: '長老' },
   ]);
+  expect(parsed.project.documents.script!.lines[1].character).toBe('案内役');
   expect(parsed.irodoriAudio).toHaveLength(4);
   const fresh = await browser.newContext();
   try {
@@ -307,6 +314,7 @@ test('carries selected Irodori samples to a new browser and plays them after rel
     await expect(script.getByRole('listitem', { name: '台本の第2行' })).toContainText(
       'Irodori仮配役：長老 → 老魔術師',
     );
+    await expect(script.getByLabel('第2行の発話者名')).toHaveValue('案内役');
     await expect(script.locator('audio[aria-label="第1行のIrodori仮配役音声"]')).toBeVisible();
     await expect(script.locator('audio[aria-label="第2行のIrodori仮配役音声"]')).toBeVisible();
   } finally {
