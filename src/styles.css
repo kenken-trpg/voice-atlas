@@ -2560,6 +2560,44 @@ footer small {
   margin: 1.5rem 0;
 }
 
+.irodori-comparison {
+  margin: 1.5rem 0;
+}
+
+.irodori-comparison-history,
+.irodori-comparison-voices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 1rem;
+  margin: 1rem 0;
+}
+
+.irodori-comparison-history article,
+.irodori-comparison-voices article {
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--border, #d8d8d8);
+  border-radius: 0.75rem;
+}
+
+.irodori-comparison-voices audio {
+  display: block;
+  width: 100%;
+  margin: 0.4rem 0 1rem;
+}
+
+.irodori-comparison fieldset label {
+  display: block;
+  margin: 0.75rem 0;
+}
+
+.irodori-comparison fieldset input:not([type='checkbox']),
+.irodori-comparison fieldset textarea {
+  display: block;
+  width: 100%;
+  max-width: 36rem;
+}
+
 .irodori-assignment-list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));

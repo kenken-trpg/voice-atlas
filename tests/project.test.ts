@@ -83,6 +83,38 @@ describe('project backups and atomic browser storage', () => {
       ),
     ).toThrow();
   });
+  it('preserves Irodori comparisons and validates their project candidates', () => {
+    const project = projectFixture();
+    project.documents.irodoriCandidates = ['old_mage', 'executive'];
+    project.documents.irodoriComparisons = [
+      { character: '長老', voiceIds: ['old_mage', 'executive'], note: '低い声が合う' },
+    ];
+    expect(parseProject(serializeProject(project)).documents.irodoriComparisons).toEqual(
+      project.documents.irodoriComparisons,
+    );
+    const old = JSON.parse(serializeProject(project));
+    delete old.documents.irodoriComparisons;
+    expect(parseProject(JSON.stringify(old)).documents.irodoriComparisons).toEqual([]);
+    expect(() =>
+      parseProject(
+        JSON.stringify({
+          ...project,
+          documents: { ...project.documents, irodoriCandidates: ['old_mage'] },
+        }),
+      ),
+    ).toThrow('Irodoriの比較');
+    expect(() =>
+      parseProject(
+        JSON.stringify({
+          ...project,
+          documents: {
+            ...project.documents,
+            irodoriComparisons: [{ character: '長老', voiceIds: ['old_mage'], note: '' }],
+          },
+        }),
+      ),
+    ).toThrow();
+  });
   it('prevents another tab from overwriting a changed project and retains its own snapshot for backup', () => {
     const store = storage();
     const project = projectFixture();

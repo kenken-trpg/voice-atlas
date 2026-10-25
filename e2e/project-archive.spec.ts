@@ -230,20 +230,26 @@ test('carries selected Irodori samples to a new browser and plays them after rel
   await voices.getByRole('button', { name: 'この端末の検証音声を読み込む' }).click();
   await expect(voices.locator('audio')).toHaveCount(6);
   await voices.getByRole('button', { name: '作品の候補に保存' }).first().click();
-  await voices.getByRole('textbox', { name: '仮配役のキャラクター名' }).fill('長老');
-  await voices.getByRole('combobox', { name: '仮配役の候補声' }).selectOption('old_mage');
-  await voices.getByRole('textbox', { name: '仮配役の理由' }).fill('落ち着いた声');
-  await voices.getByRole('button', { name: '仮配役を保存' }).click();
+  await voices.getByRole('button', { name: '作品の候補に保存' }).first().click();
+  const comparison = voices.getByRole('region', { name: 'キャラクターごとのIrodori比較' });
+  await comparison.getByRole('textbox', { name: '比較するキャラクター名' }).fill('長老');
+  await comparison.getByRole('checkbox', { name: '老魔術師' }).check();
+  await comparison.getByRole('checkbox', { name: '企業幹部' }).check();
+  await comparison.getByRole('textbox', { name: 'Irodoriの比較メモ' }).fill('落ち着いた声');
+  await comparison.getByRole('button', { name: 'この声に仮配役' }).first().click();
   await page.getByText('作品を保存・復元する', { exact: true }).click();
   const event = page.waitForEvent('download');
   await page.getByRole('button', { name: '音声付き作品アーカイブを書き出す' }).click();
   const buffer = await bytes(await event);
   const parsed = await parseProjectArchive(new Blob([buffer]));
-  expect(parsed.project.documents.irodoriCandidates).toEqual(['old_mage']);
+  expect(parsed.project.documents.irodoriCandidates).toEqual(['old_mage', 'executive']);
+  expect(parsed.project.documents.irodoriComparisons).toEqual([
+    { character: '長老', voiceIds: ['old_mage', 'executive'], note: '落ち着いた声' },
+  ]);
   expect(parsed.project.documents.irodoriAssignments).toEqual([
     { character: '長老', voiceId: 'old_mage', reason: '落ち着いた声' },
   ]);
-  expect(parsed.irodoriAudio).toHaveLength(2);
+  expect(parsed.irodoriAudio).toHaveLength(4);
   const fresh = await browser.newContext();
   try {
     const other = await fresh.newPage();
@@ -256,7 +262,7 @@ test('carries selected Irodori samples to a new browser and plays them after rel
     await expect(archive.getByRole('alert')).toContainText('Irodoriの候補音声が破損');
     await inspect(other, buffer);
     await expect(archive.getByRole('group', { name: '音声付き作品の復元確認' })).toContainText(
-      'Irodori候補音声2件',
+      'Irodori候補音声4件',
     );
     await other.evaluate((key) => {
       const original = Storage.prototype.setItem;
@@ -273,11 +279,14 @@ test('carries selected Irodori samples to a new browser and plays them after rel
     await other.getByText('作品を保存・復元する', { exact: true }).click();
     await inspect(other, buffer);
     await archive.getByRole('button', { name: '確認した音声付き作品を復元' }).click();
-    await expect(restored.locator('audio')).toHaveCount(3);
+    await expect(restored.locator('audio')).toHaveCount(5);
     await other.reload();
-    await expect(restored.locator('audio')).toHaveCount(3);
-    await expect(restored.getByText('この作品の候補：1件 / 3件')).toBeVisible();
+    await expect(restored.locator('audio')).toHaveCount(5);
+    await expect(restored.getByText('この作品の候補：2件 / 3件')).toBeVisible();
     await expect(restored.getByRole('heading', { name: '長老：老魔術師' })).toBeVisible();
+    await expect(restored.getByText('比較メモ：落ち着いた声')).toBeVisible();
+    await restored.getByRole('button', { name: '比較を開く' }).click();
+    await expect(restored.locator('audio')).toHaveCount(9);
   } finally {
     await fresh.close();
   }

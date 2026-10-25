@@ -65,3 +65,29 @@ test('keeps provisional character casting with its selected voice', async ({ pag
   await panel.getByRole('button', { name: '候補から外す' }).click();
   await expect(panel.getByText('この作品の候補：0件 / 3件')).toBeVisible();
 });
+
+test('compares voices for a character and decides the provisional cast', async ({ page }) => {
+  await page.goto('/');
+  const panel = page.getByRole('region', { name: 'Irodori生成済みの声を比較' });
+  await panel.getByRole('button', { name: '作品の候補に保存' }).first().click();
+  await panel.getByRole('button', { name: '作品の候補に保存' }).first().click();
+  const comparison = panel.getByRole('region', { name: 'キャラクターごとのIrodori比較' });
+  await comparison.getByRole('textbox', { name: '比較するキャラクター名' }).fill('長老');
+  await comparison.getByRole('checkbox', { name: '老魔術師' }).check();
+  await comparison.getByRole('checkbox', { name: '企業幹部' }).check();
+  await expect(comparison.getByRole('heading', { name: '老魔術師' })).toBeVisible();
+  await expect(comparison.getByRole('heading', { name: '企業幹部' })).toBeVisible();
+  await comparison.getByRole('textbox', { name: 'Irodoriの比較メモ' }).fill('落ち着いた声を採用');
+  await comparison.getByRole('button', { name: '比較メモを保存' }).click();
+  await expect(comparison.getByText('比較メモ：落ち着いた声を採用')).toBeVisible();
+  await page.getByText('作品を保存・復元する', { exact: true }).click();
+  await page.getByRole('button', { name: '作品をブラウザに保存' }).click();
+  await page.reload();
+  await expect(comparison.getByText('比較メモ：落ち着いた声を採用')).toBeVisible();
+  await comparison.getByRole('button', { name: '比較を開く' }).click();
+  await comparison.getByRole('button', { name: 'この声に仮配役' }).first().click();
+  await expect(panel.getByRole('heading', { name: '長老：老魔術師' })).toBeVisible();
+  await expect(comparison.getByText('現在の仮配役：老魔術師')).toBeVisible();
+  await panel.getByRole('button', { name: '候補から外す' }).nth(1).click();
+  await expect(panel.getByRole('alert')).toContainText('比較記録');
+});

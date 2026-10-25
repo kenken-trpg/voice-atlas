@@ -5,11 +5,13 @@ import {
   irodoriModel,
   irodoriModelRevision,
   type IrodoriAssignment,
+  type IrodoriComparison as IrodoriComparisonRecord,
   type IrodoriVoiceId,
 } from '../../shared/irodori-candidates';
 import { useProject, useProjectPart } from '../lib/project-context';
 import { readIrodoriAudio, saveIrodoriAudio } from '../lib/irodori-audio-store';
 import { pauseOtherAudio } from './ComparisonPanel';
+import { IrodoriComparison } from './IrodoriComparison';
 
 export function IrodoriCandidates() {
   const { initial } = useProject();
@@ -18,6 +20,9 @@ export function IrodoriCandidates() {
   );
   const [assignments, setAssignments] = useState<IrodoriAssignment[]>(
     initial?.documents.irodoriAssignments ?? [],
+  );
+  const [comparisons, setComparisons] = useState<IrodoriComparisonRecord[]>(
+    initial?.documents.irodoriComparisons ?? [],
   );
   const [editing, setEditing] = useState<string | null>(null);
   const [character, setCharacter] = useState('');
@@ -32,6 +37,7 @@ export function IrodoriCandidates() {
 
   useProjectPart('irodoriCandidates', () => selected, busy);
   useProjectPart('irodoriAssignments', () => assignments, busy);
+  useProjectPart('irodoriComparisons', () => comparisons, busy);
 
   function setAudioUrls(blobs: Record<string, Blob>) {
     const next = Object.fromEntries(
@@ -105,6 +111,10 @@ export function IrodoriCandidates() {
   function toggle(id: IrodoriVoiceId) {
     if (selected.includes(id) && assignments.some((item) => item.voiceId === id)) {
       setError('この声には仮配役があります。先に仮配役を変更または削除してください。');
+      return;
+    }
+    if (selected.includes(id) && comparisons.some((item) => item.voiceIds.includes(id))) {
+      setError('この声には比較記録があります。先に比較記録を変更または削除してください。');
       return;
     }
     setError('');
@@ -212,6 +222,15 @@ export function IrodoriCandidates() {
         ))}
       </div>
       <p role="status">この作品の候補：{selected.length}件 / 3件</p>
+      <IrodoriComparison
+        selected={selected}
+        comparisons={comparisons}
+        setComparisons={setComparisons}
+        assignments={assignments}
+        setAssignments={setAssignments}
+        audio={audio}
+        busy={busy}
+      />
       <section className="irodori-assignments" aria-label="Irodoriの仮配役">
         <h3>キャラクターへの仮配役</h3>
         <p>
