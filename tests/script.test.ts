@@ -30,6 +30,8 @@ describe('voice scripts', () => {
     const line = script.lines[0],
       original = scriptAudioKey(line);
     expect(scriptAudioKey([...script.lines].reverse()[1])).toBe(original);
+    expect(scriptAudioKey({ ...line, character: '別の発話者' })).toBe(original);
+    expect(scriptAudioKey({ ...line, character: undefined })).toBe(original);
     expect(scriptAudioKey({ ...line, text: '別のセリフ' })).not.toBe(original);
     expect(scriptAudioKey({ ...line, id: crypto.randomUUID() })).not.toBe(original);
     expect(scriptAudioKey({ ...line, assignment: script.lines[1].assignment })).not.toBe(original);

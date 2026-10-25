@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { defaultAnthropicModel, defaultGeminiModel } from '../shared/schema';
+import { defaultAnthropicModel, defaultDeepseekModel, defaultGeminiModel } from '../shared/schema';
 export interface Config {
   port: number;
   ollamaUrl: string;
@@ -10,6 +10,8 @@ export interface Config {
   anthropicModel: string;
   geminiKey: string;
   geminiModel: string;
+  deepseekKey: string;
+  deepseekModel: string;
   voicevoxUrl: string;
   aivisUrl?: string;
 }
@@ -44,6 +46,8 @@ export function loadConfig(): Config {
     anthropicModel: process.env.ANTHROPIC_MODEL || defaultAnthropicModel,
     geminiKey: (process.env.GEMINI_API_KEY || '').trim(),
     geminiModel: process.env.GEMINI_MODEL || defaultGeminiModel,
+    deepseekKey: (process.env.DEEPSEEK_API_KEY || '').trim(),
+    deepseekModel: process.env.DEEPSEEK_MODEL || defaultDeepseekModel,
     aivisUrl: loopbackUrl(process.env.AIVIS_BASE_URL || 'http://127.0.0.1:10101'),
     voicevoxUrl: loopbackUrl(process.env.VOICEVOX_BASE_URL || 'http://127.0.0.1:50021'),
   };

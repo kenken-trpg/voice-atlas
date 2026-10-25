@@ -1,4 +1,10 @@
 import { z } from 'zod';
+import {
+  irodoriAssignmentsSchema,
+  irodoriComparisonsSchema,
+  irodoriSelectionSchema,
+  irodoriSpeakerLinksSchema,
+} from './irodori-candidates';
 import { pronunciationsSchema } from './pronunciations';
 import { characterInputSchema, profileSchema } from './schema';
 import { parseSavedRecipe } from './saved-recipe';
@@ -57,6 +63,10 @@ const projectSchema = z.object({
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   documents: z.object({
+    irodoriCandidates: irodoriSelectionSchema.default([]),
+    irodoriAssignments: irodoriAssignmentsSchema.default([]),
+    irodoriComparisons: irodoriComparisonsSchema.default([]),
+    irodoriSpeakerLinks: irodoriSpeakerLinksSchema.default([]),
     pronunciations: pronunciationsSchema.default([]),
     workbench: workbenchSchema.nullable(),
     casting: castingWorkSchema.nullable(),
@@ -72,6 +82,14 @@ export function validateProject(value: unknown) {
   if (jsonBytes(value) > maxProjectBytes) throw new Error('作品JSONは32MiB以下にしてください。');
   const parsed = projectSchema.parse(value);
   const d = parsed.documents;
+  if (d.irodoriAssignments.some((item) => !d.irodoriCandidates.includes(item.voiceId)))
+    throw new Error('Irodoriの仮配役には作品で選んだ候補声を指定してください。');
+  if (
+    d.irodoriComparisons.some((item) =>
+      item.voiceIds.some((id) => !d.irodoriCandidates.includes(id)),
+    )
+  )
+    throw new Error('Irodoriの比較には作品で選んだ候補声を指定してください。');
   const documents = {
     ...d,
     voiceLibrary: parseLibrary(JSON.stringify(d.voiceLibrary)),
@@ -277,6 +295,10 @@ export function legacyDocuments(storage: ProjectStorage): ProjectDocuments {
   const script = storage.getItem(scriptStorageKey);
   const scripts = storage.getItem(scriptLibraryStorageKey);
   return {
+    irodoriCandidates: [],
+    irodoriAssignments: [],
+    irodoriComparisons: [],
+    irodoriSpeakerLinks: [],
     workbench: null,
     pronunciations: [],
     casting: null,
@@ -291,7 +313,7 @@ export function legacyDocuments(storage: ProjectStorage): ProjectDocuments {
 }
 export function projectSummary(project: VoiceProject) {
   const d = project.documents;
-  return `採用声${d.voiceLibrary.entries.length}件・配役${d.castingBoard.assignments.length}件・保存台本${d.scriptLibrary.entries.length}件・編集中の台本${d.script?.lines.length ?? 0}行`;
+  return `採用声${d.voiceLibrary.entries.length}件・Irodori候補${d.irodoriCandidates.length}件・比較${d.irodoriComparisons.length}件・仮配役${d.irodoriAssignments.length}件・発話者対応${d.irodoriSpeakerLinks.length}件・配役${d.castingBoard.assignments.length}件・保存台本${d.scriptLibrary.entries.length}件・編集中の台本${d.script?.lines.length ?? 0}行`;
 }
 
 // A project occupies one storage item, so switching and saving never partially replace

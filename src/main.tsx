@@ -25,6 +25,7 @@ import {
   providerLabels,
   defaultAnthropicModel,
   defaultGeminiModel,
+  defaultDeepseekModel,
   type Provider,
   type Analysis,
   type Capabilities,
@@ -55,6 +56,7 @@ import { jsonRequest, download } from './lib/http';
 import { ProjectProvider, useProject, useProjectPart } from './lib/project-context';
 import { ProjectPanel } from './components/ProjectPanel';
 import { ConnectionGuide } from './components/ConnectionGuide';
+import { IrodoriCandidates } from './components/IrodoriCandidates';
 import './styles.css';
 
 type Mode = 'manual' | Provider;
@@ -154,6 +156,7 @@ function App() {
   const [guideBusy, setGuideBusy] = useState(false);
   const [loadingImage, setLoadingImage] = useState(false);
   const [error, setError] = useState('');
+  const [visualCorrection, setVisualCorrection] = useState('');
   const [audioCache, setAudioCache] = useState<
     Record<string, { key: string; url: string; engineInfo: EngineInfo | null }>
   >({});
@@ -270,6 +273,7 @@ function App() {
       if (generation !== imageGeneration.current) return;
       setImage({ url, name: file.name });
       setAnalysis(null);
+      setVisualCorrection('');
       setInputMode('image');
       setProfileInput(null);
       setConsent(false);
@@ -305,6 +309,25 @@ function App() {
     setSelectedId(null);
     setError('');
     revealResults();
+  }
+  function applyVisualCorrection() {
+    const correction = visualCorrection.trim();
+    if (!correction) return;
+    const next = [characterText.trim(), `画像についての作者の訂正: ${correction}`]
+      .filter(Boolean)
+      .join('\n');
+    if (next.length > 2000) {
+      setError('キャラクター設定は2000文字以内にしてください。');
+      return;
+    }
+    setCharacterText(next);
+    setVisualCorrection('');
+    setConsent(false);
+    setError('');
+    document
+      .getElementById('character-setting')
+      ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    document.getElementById('character-setting')?.focus({ preventScroll: true });
   }
   async function analyze() {
     if (mode === 'manual') {
@@ -345,6 +368,7 @@ function App() {
         return;
       }
       setAnalysis(result.analysis);
+      setVisualCorrection('');
       setProfileInput(currentInput());
       setProfile(result.analysis.profile);
       setSource(mode);
@@ -581,7 +605,7 @@ function App() {
     mode === 'manual' ||
     (mode === 'ollama' && inputMode === 'text'
       ? Boolean(caps?.ollama.textReady ?? caps?.ollama.ready)
-      : Boolean(caps?.[mode].ready));
+      : Boolean(caps?.[mode]?.ready));
   return (
     <>
       <header className="site-header">
@@ -604,7 +628,7 @@ function App() {
               aria-expanded={settingsOpen}
             >
               <span
-                className={`status-dot ${caps?.ollama.ready || caps?.ollama.textReady || caps?.openai.ready || caps?.anthropic?.ready || caps?.gemini?.ready ? 'online' : ''}`}
+                className={`status-dot ${caps?.ollama.ready || caps?.ollama.textReady || caps?.openai.ready || caps?.anthropic?.ready || caps?.gemini?.ready || caps?.deepseek?.ready ? 'online' : ''}`}
               />
               <span>接続設定</span>
               <SlidersHorizontal size={15} />
@@ -643,6 +667,7 @@ function App() {
           onBusyChange={setGuideBusy}
         />
         <ProjectPanel />
+        <IrodoriCandidates />
         <div className="recipe-import">
           <button
             className="secondary-button"
@@ -782,6 +807,22 @@ function App() {
               </div>
               <div>
                 <strong>
+                  <span className={`status-dot ${caps?.deepseek?.ready ? 'online' : ''}`} />
+                  DeepSeek
+                </strong>
+                <p>
+                  {caps?.deepseek?.ready
+                    ? 'APIキー設定済み（接続・利用権限は未検証）'
+                    : 'サーバーの .env にAPIキーを設定'}
+                </p>
+                <code>DEEPSEEK_API_KEY=…</code>
+                <small>
+                  モデル: {caps?.deepseek?.model || defaultDeepseekModel}
+                  。DEEPSEEK_MODELで変更できます。設定後はサーバーを再起動してください。API利用料はご自身のアカウントに発生します。
+                </small>
+              </div>
+              <div>
+                <strong>
                   <span className={`status-dot ${caps?.voicevox.ready ? 'online' : ''}`} />
                   VOICEVOX
                 </strong>
@@ -810,6 +851,15 @@ function App() {
           <div className="error-banner" role="alert">
             <CircleHelp size={19} />
             <span>{error}</span>
+            {mode === 'deepseek' && error.startsWith('DeepSeekの') && (
+              <button
+                className="text-button"
+                onClick={() => void analyze()}
+                disabled={busy !== null}
+              >
+                手動で再試行
+              </button>
+            )}
             <button
               className="icon-button"
               onClick={() => setError('')}
@@ -846,6 +896,7 @@ function App() {
                       checked={inputMode === item.value}
                       onChange={() => {
                         setInputMode(item.value);
+                        setVisualCorrection('');
                         setConsent(false);
                         setError('');
                       }}
@@ -967,6 +1018,7 @@ function App() {
                     { id: 'openai', label: 'OpenAI', hint: '外部API' },
                     { id: 'anthropic', label: 'Claude', hint: 'Anthropic API' },
                     { id: 'gemini', label: 'Gemini', hint: 'Google API' },
+                    { id: 'deepseek', label: 'DeepSeek', hint: 'DeepSeek API' },
                   ] as const
                 ).map((item) => (
                   <label key={item.id} className={mode === item.id ? 'active' : ''}>
@@ -1027,6 +1079,11 @@ function App() {
                         に送信することに同意する（API利用料がかかる場合があります）
                       </span>
                     </label>
+                  )}
+                  {mode === 'deepseek' && (
+                    <small>
+                      解析結果の形式が合わない場合は自動で1回再試行します。再試行分にもAPI利用料がかかる場合があります。
+                    </small>
                   )}
                   {!providerReady && (
                     <div className="setup-note">
@@ -1197,7 +1254,31 @@ function App() {
                           <span key={index}>{cue}</span>
                         ))}
                       </div>
-                      <small>{analysis.delivery}</small>
+                      <small>声の演出案：{analysis.delivery}</small>
+                      {profileInput?.mode === 'image' && (
+                        <div className="visual-correction">
+                          <label htmlFor="visual-correction">画像の説明に誤りがある場合</label>
+                          <textarea
+                            id="visual-correction"
+                            value={visualCorrection}
+                            maxLength={300}
+                            rows={2}
+                            disabled={disabled}
+                            placeholder="例：耳元に端末は付いていません。頬の白い線は装飾です。"
+                            onChange={(event) => setVisualCorrection(event.target.value)}
+                          />
+                          <button
+                            className="text-button"
+                            onClick={applyVisualCorrection}
+                            disabled={disabled || !visualCorrection.trim()}
+                          >
+                            訂正を設定に反映
+                          </button>
+                          <small>
+                            設定を確認してから再解析してください。外部APIには再度の同意が必要です。
+                          </small>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}

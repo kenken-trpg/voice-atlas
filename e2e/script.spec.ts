@@ -71,6 +71,51 @@ async function exported(page: Page, panel: Locator) {
   for await (const chunk of stream) chunks.push(Buffer.from(chunk));
   return parseScript(Buffer.concat(chunks).toString());
 }
+test('edits and bulk renames speakers without invalidating generated audio', async ({ page }) => {
+  await page.route('**/api/casting/preview', (route) =>
+    route.fulfill({
+      contentType: 'audio/wav',
+      body: wav(),
+      headers: {
+        'X-Voice-Atlas-Generation': encodeURIComponent(
+          JSON.stringify({
+            engine: 'AivisSpeech',
+            engineVersion: 'speaker-test',
+            checkedAt: fixture.assignments[0].assignedAt,
+          }),
+        ),
+      },
+    }),
+  );
+  const panel = await open(page);
+  const withSpeakers = {
+    ...fixture.script,
+    lines: fixture.script.lines.map((line) => ({ ...line, character: '長老' })),
+  };
+  await panel.getByLabel('台本JSONファイル').setInputFiles(file(serializeScript(withSpeakers)));
+  await panel.getByRole('button', { name: '第1行を生成' }).click();
+  const player = panel.locator('audio[aria-label="台本の第1行の試聴"]');
+  await expect(player).toBeVisible();
+  const url = await player.getAttribute('src');
+  await panel.getByLabel('第1行の発話者名').fill('魔術師');
+  await expect(player).toHaveAttribute('src', url!);
+  await panel.getByLabel('第1行の発話者名').fill('');
+  await expect(player).toHaveAttribute('src', url!);
+  await panel.getByLabel('第1行の発話者名').fill('長老');
+  await panel.getByRole('combobox', { name: '一括改名する発話者' }).selectOption('長老');
+  await panel.getByRole('textbox', { name: '一括改名後の発話者名' }).fill('語り手');
+  await panel.getByRole('button', { name: '2行の発話者名を変更' }).click();
+  await expect(panel.getByLabel('第1行の発話者名')).toHaveValue('語り手');
+  await expect(panel.getByLabel('第2行の発話者名')).toHaveValue('語り手');
+  await expect(player).toHaveAttribute('src', url!);
+  await expect(
+    panel.getByRole('status').filter({ hasText: '台本：2行 / 音声生成済み1行' }),
+  ).toBeVisible();
+  expect((await exported(page, panel)).lines.map((line) => line.character)).toEqual([
+    '語り手',
+    '語り手',
+  ]);
+});
 test('assigns board voices, generates native audio in order, plays the dialogue and retains audio through reordering', async ({
   page,
 }, testInfo) => {

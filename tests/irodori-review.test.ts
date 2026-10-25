@@ -4,6 +4,7 @@ import { createServer, type Server } from 'node:http';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { gzipSync } from 'node:zlib';
 import { createIrodoriReviewApp, prepareReviewRuns } from '../server/irodori-review';
 
 const cleanup: (() => Promise<void>)[] = [];
@@ -61,10 +62,14 @@ describe('Irodori local review', () => {
     const runs = await (await fetch(`${base}/api/runs`)).json();
     expect(runs[0].samples[0]).toMatchObject({ id: 'sample-001', text: 'テスト' });
     expect(runs[0].samples[0].sha256).toBeUndefined();
+    expect(runs[0].name).toBe(directory.split('/').at(-1));
+    expect(JSON.stringify(runs)).not.toContain(directory);
     expect((await fetch(`${base}/api/audio/0/sample-001`)).status).toBe(200);
     expect((await fetch(`${base}/api/audio/0/sample-999`)).status).toBe(404);
     await writeFile(join(directory, 'sample-001.wav'), 'changed');
-    expect((await fetch(`${base}/api/audio/0/sample-001`)).status).toBe(500);
+    const invalidAudio = await fetch(`${base}/api/audio/0/sample-001`);
+    expect(invalidAudio.status).toBe(500);
+    expect(JSON.stringify(await invalidAudio.json())).not.toContain(directory);
     expect(await readFile(join(directory, 'manifest.json'))).toEqual(before);
   });
 
@@ -102,5 +107,29 @@ describe('Irodori local review', () => {
     manifest.samples[0].file = '../outside.wav';
     await writeFile(join(directory, 'manifest.json'), JSON.stringify(manifest));
     await expect(prepareReviewRuns([directory])).rejects.toThrow();
+  });
+
+  it('blocks cross-site reads and invalid or compressed review writes', async () => {
+    const { base } = await fixture();
+    expect(
+      (await fetch(`${base}/api/runs`, { headers: { 'Sec-Fetch-Site': 'cross-site' } })).status,
+    ).toBe(403);
+    expect(
+      (await fetch(`${base}/api/review/0`, { headers: { Origin: 'https://example.test' } })).status,
+    ).toBe(403);
+    const put = (headers: Record<string, string>, body: BodyInit) =>
+      fetch(`${base}/api/review/0`, { method: 'PUT', headers: { Origin: base, ...headers }, body });
+    expect((await put({ 'Content-Type': 'text/plain' }, '{}')).status).toBe(415);
+    expect(
+      (
+        await put(
+          { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' },
+          gzipSync('{}'),
+        )
+      ).status,
+    ).toBe(415);
+    expect((await put({ 'Content-Type': 'application/json' }, ' '.repeat(65 * 1024))).status).toBe(
+      413,
+    );
   });
 });

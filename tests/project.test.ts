@@ -29,6 +29,116 @@ function storage() {
   };
 }
 describe('project backups and atomic browser storage', () => {
+  it('saves Irodori candidate choices and loads older projects with none selected', () => {
+    const project = projectFixture();
+    project.documents.irodoriCandidates = ['old_mage', 'male_ai'];
+    expect(parseProject(serializeProject(project)).documents.irodoriCandidates).toEqual([
+      'old_mage',
+      'male_ai',
+    ]);
+    const old = JSON.parse(serializeProject(project));
+    delete old.documents.irodoriCandidates;
+    expect(parseProject(JSON.stringify(old)).documents.irodoriCandidates).toEqual([]);
+    expect(() =>
+      parseProject(
+        JSON.stringify({
+          ...project,
+          documents: { ...project.documents, irodoriCandidates: ['old_mage', 'old_mage'] },
+        }),
+      ),
+    ).toThrow();
+  });
+  it('preserves Irodori character assignments and rejects missing or duplicate candidates', () => {
+    const project = projectFixture();
+    project.documents.irodoriCandidates = ['old_mage'];
+    project.documents.irodoriAssignments = [
+      { character: '長老', voiceId: 'old_mage', reason: '落ち着いた声が合う' },
+    ];
+    expect(parseProject(serializeProject(project)).documents.irodoriAssignments).toEqual(
+      project.documents.irodoriAssignments,
+    );
+    const old = JSON.parse(serializeProject(project));
+    delete old.documents.irodoriAssignments;
+    expect(parseProject(JSON.stringify(old)).documents.irodoriAssignments).toEqual([]);
+    expect(() =>
+      parseProject(
+        JSON.stringify({
+          ...project,
+          documents: { ...project.documents, irodoriCandidates: [] },
+        }),
+      ),
+    ).toThrow('Irodoriの仮配役');
+    expect(() =>
+      parseProject(
+        JSON.stringify({
+          ...project,
+          documents: {
+            ...project.documents,
+            irodoriAssignments: [
+              ...project.documents.irodoriAssignments,
+              ...project.documents.irodoriAssignments,
+            ],
+          },
+        }),
+      ),
+    ).toThrow();
+  });
+  it('preserves Irodori comparisons and validates their project candidates', () => {
+    const project = projectFixture();
+    project.documents.irodoriCandidates = ['old_mage', 'executive'];
+    project.documents.irodoriComparisons = [
+      { character: '長老', voiceIds: ['old_mage', 'executive'], note: '低い声が合う' },
+    ];
+    expect(parseProject(serializeProject(project)).documents.irodoriComparisons).toEqual(
+      project.documents.irodoriComparisons,
+    );
+    const old = JSON.parse(serializeProject(project));
+    delete old.documents.irodoriComparisons;
+    expect(parseProject(JSON.stringify(old)).documents.irodoriComparisons).toEqual([]);
+    expect(() =>
+      parseProject(
+        JSON.stringify({
+          ...project,
+          documents: { ...project.documents, irodoriCandidates: ['old_mage'] },
+        }),
+      ),
+    ).toThrow('Irodoriの比較');
+    expect(() =>
+      parseProject(
+        JSON.stringify({
+          ...project,
+          documents: {
+            ...project.documents,
+            irodoriComparisons: [{ character: '長老', voiceIds: ['old_mage'], note: '' }],
+          },
+        }),
+      ),
+    ).toThrow();
+  });
+  it('keeps explicit Irodori speaker links in projects and defaults old projects to none', () => {
+    const project = projectFixture();
+    project.documents.irodoriSpeakerLinks = [{ speaker: 'ナレーター', character: '長老' }];
+    expect(parseProject(serializeProject(project)).documents.irodoriSpeakerLinks).toEqual(
+      project.documents.irodoriSpeakerLinks,
+    );
+    const old = JSON.parse(serializeProject(project));
+    delete old.documents.irodoriSpeakerLinks;
+    expect(parseProject(JSON.stringify(old)).documents.irodoriSpeakerLinks).toEqual([]);
+    expect(() =>
+      parseProject(
+        JSON.stringify({
+          ...project,
+          documents: {
+            ...project.documents,
+            irodoriSpeakerLinks: [
+              ...project.documents.irodoriSpeakerLinks,
+              ...project.documents.irodoriSpeakerLinks,
+            ],
+          },
+        }),
+      ),
+    ).toThrow();
+  });
   it('prevents another tab from overwriting a changed project and retains its own snapshot for backup', () => {
     const store = storage();
     const project = projectFixture();

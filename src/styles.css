@@ -951,6 +951,10 @@ textarea::placeholder {
   flex-shrink: 0;
   margin-top: 4px;
 }
+.analysis-card > div {
+  min-width: 0;
+  flex: 1;
+}
 .analysis-card p {
   font-size: 12px;
   line-height: 1.9;
@@ -975,6 +979,25 @@ textarea::placeholder {
   font-size: 9px;
   padding: 2px 7px;
   color: #6e805e;
+}
+.visual-correction {
+  border-top: 1px solid #d5e0ca;
+  margin-top: 15px;
+  padding-top: 12px;
+}
+.visual-correction label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  color: #4f6545;
+}
+.visual-correction textarea {
+  width: 100%;
+  margin: 7px 0;
+  resize: vertical;
+}
+.visual-correction .text-button {
+  padding: 0;
 }
 .filters {
   display: flex;
@@ -2505,4 +2528,138 @@ footer small {
 }
 .recast-audio-side {
   min-width: 0;
+}
+.irodori-candidates {
+  margin: 2rem auto;
+  padding: 1.5rem;
+  max-width: 1200px;
+  border: 1px solid var(--border, #d8d8d8);
+  border-radius: 1rem;
+}
+
+.irodori-candidate-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 1rem;
+}
+
+.irodori-candidate-card {
+  padding: 1rem;
+  border: 1px solid var(--border, #d8d8d8);
+  border-radius: 0.75rem;
+}
+
+.irodori-candidate-card audio,
+.irodori-assignment-list audio {
+  display: block;
+  width: 100%;
+  margin: 0.4rem 0 1rem;
+}
+
+.irodori-assignments {
+  margin: 1.5rem 0;
+}
+
+.irodori-comparison {
+  margin: 1.5rem 0;
+}
+
+.irodori-comparison-history,
+.irodori-comparison-voices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 1rem;
+  margin: 1rem 0;
+}
+
+.irodori-comparison-history article,
+.irodori-comparison-voices article {
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--border, #d8d8d8);
+  border-radius: 0.75rem;
+}
+
+.irodori-comparison-voices audio {
+  display: block;
+  width: 100%;
+  margin: 0.4rem 0 1rem;
+}
+
+.irodori-comparison fieldset label {
+  display: block;
+  margin: 0.75rem 0;
+}
+
+.irodori-comparison fieldset input:not([type='checkbox']),
+.irodori-comparison fieldset textarea {
+  display: block;
+  width: 100%;
+  max-width: 36rem;
+}
+
+.irodori-script-links {
+  margin: 1.5rem 0;
+  padding: 1rem;
+  border: 1px solid var(--border, #d8d8d8);
+  border-radius: 0.75rem;
+}
+
+.irodori-script-links > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.75rem 0;
+}
+
+.irodori-script-links select {
+  display: block;
+  max-width: 100%;
+}
+
+.irodori-script-links fieldset {
+  margin: 1rem 0;
+}
+
+.irodori-script-links fieldset label {
+  display: block;
+  margin: 0.5rem 0;
+}
+
+.irodori-script-links fieldset input {
+  display: block;
+  width: min(100%, 28rem);
+}
+
+.irodori-script-preview audio {
+  display: block;
+  width: min(100%, 32rem);
+}
+
+.irodori-assignment-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 1rem;
+  margin: 1rem 0;
+}
+
+.irodori-assignment-list article {
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--border, #d8d8d8);
+  border-radius: 0.75rem;
+}
+
+.irodori-assignments fieldset label {
+  display: block;
+  margin: 0.75rem 0;
+}
+
+.irodori-assignments fieldset input,
+.irodori-assignments fieldset select,
+.irodori-assignments fieldset textarea {
+  display: block;
+  width: 100%;
+  max-width: 36rem;
 }

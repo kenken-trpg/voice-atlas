@@ -4,7 +4,13 @@ import {
   readWorkspaceProject,
 } from '../../shared/project';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { useProjectPart } from '../lib/project-context';
+import { useProject, useProjectPart } from '../lib/project-context';
+import {
+  irodoriCandidates,
+  irodoriSpeakerLinksSchema,
+  type IrodoriSpeakerLink,
+} from '../../shared/irodori-candidates';
+import { readIrodoriAudio } from '../lib/irodori-audio-store';
 import { type CastingAssignment } from '../../shared/casting-board';
 import {
   emptyScript,
@@ -69,6 +75,14 @@ export function VoiceScript({
   currentModel: (candidate: CastingCandidate) => AivisModelInfo | undefined;
   onBusyChange: (busy: boolean) => void;
 }) {
+  const { initial: projectInitial, irodoriAssignments, irodoriAudioRevision } = useProject();
+  const [speakerLinks, setSpeakerLinks] = useState<IrodoriSpeakerLink[]>(
+    projectInitial?.documents.irodoriSpeakerLinks ?? [],
+  );
+  const [irodoriUrls, setIrodoriUrls] = useState<Record<string, string>>({});
+  const [irodoriError, setIrodoriError] = useState('');
+  const [renameFrom, setRenameFrom] = useState('');
+  const [renameTo, setRenameTo] = useState('');
   const [initial] = useState(() => {
     try {
       const raw = readWorkspaceDocument(scriptStorageKey);
@@ -120,6 +134,90 @@ export function VoiceScript({
   const baseLocked = disabled || busy || loading || exporting || cacheBusy;
   const locked = baseLocked || switching;
   useProjectPart('script', () => script, locked);
+  useProjectPart('irodoriSpeakerLinks', () => speakerLinks, locked);
+  useEffect(() => {
+    if (!active || !opened) {
+      setIrodoriUrls({});
+      return;
+    }
+    let current = true;
+    let urls: string[] = [];
+    setIrodoriUrls({});
+    readIrodoriAudio()
+      .then((blobs) => {
+        if (!current) return;
+        const next = Object.fromEntries(
+          Object.entries(blobs).map(([hash, blob]) => [hash, URL.createObjectURL(blob)]),
+        );
+        urls = Object.values(next);
+        setIrodoriUrls(next);
+        setIrodoriError('');
+      })
+      .catch(() => {
+        if (current) setIrodoriError('Irodoriの保存済み音声を読み込めませんでした。');
+      });
+    return () => {
+      current = false;
+      urls.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [active, opened, irodoriAudioRevision]);
+  function irodoriForSpeaker(speaker: string) {
+    const explicit = speakerLinks.find((item) => item.speaker === speaker);
+    return irodoriAssignments.find((item) => item.character === (explicit?.character ?? speaker));
+  }
+  function irodoriUrl(voiceId: string) {
+    const sample = irodoriCandidates.find((voice) => voice.id === voiceId)?.samples[0];
+    return sample ? irodoriUrls[sample.sha256] : undefined;
+  }
+  function linkSpeaker(speaker: string, character: string) {
+    const result = irodoriSpeakerLinksSchema.safeParse([
+      ...speakerLinks.filter((item) => item.speaker !== speaker),
+      ...(character ? [{ speaker, character }] : []),
+    ]);
+    if (!result.success) {
+      setIrodoriError(
+        result.error.issues[0]?.message ?? '発話者の対応付けを保存できませんでした。',
+      );
+      return;
+    }
+    setSpeakerLinks(result.data);
+    setIrodoriError('');
+  }
+  const scriptSpeakers = [
+    ...new Set(
+      script.lines
+        .map((line) => line.character?.trim())
+        .filter((name): name is string => Boolean(name)),
+    ),
+  ];
+  const linkedSpeakers = [
+    ...new Set([...scriptSpeakers, ...speakerLinks.map((item) => item.speaker)]),
+  ];
+  function renameSpeaker() {
+    const from = renameFrom;
+    const to = renameTo.trim();
+    if (!from || !scriptSpeakers.includes(from) || !to || to === from) return;
+    const count = script.lines.filter((line) => line.character?.trim() === from).length;
+    setScript((current) => ({
+      ...current,
+      lines: current.lines.map((line) =>
+        line.character?.trim() === from ? { ...line, character: to } : line,
+      ),
+    }));
+    setSpeakerLinks((current) => {
+      const old = current.find((item) => item.speaker === from);
+      if (!old) return current;
+      const withoutOld = current.filter((item) => item.speaker !== from);
+      if (withoutOld.some((item) => item.speaker === to)) return withoutOld;
+      return irodoriSpeakerLinksSchema.parse([
+        ...withoutOld,
+        { speaker: to, character: old.character },
+      ]);
+    });
+    setRenameFrom('');
+    setRenameTo('');
+    setNotice(`${count}行の発話者名を変更しました。生成済み音声は保持しています。`);
+  }
   function stop() {
     queue.current = [];
     setPlayingId(null);
@@ -191,7 +289,7 @@ export function VoiceScript({
     }
     if (after.spokenText === undefined) delete after.readingSource;
     if (scriptAudioKey(before) !== scriptAudioKey(after)) clear([id]);
-    else stop();
+    else if (!('character' in update && Object.keys(update).length === 1)) stop();
     setScript((value) => ({
       ...value,
       lines: value.lines.map((line) => (line.id === id ? after : line)),
@@ -868,6 +966,92 @@ export function VoiceScript({
             onBusyChange(value);
           }}
         />
+        <section className="irodori-script-links" aria-label="台本発話者とIrodori仮配役">
+          <h4>発話者のIrodori仮配役を確認</h4>
+          <p>
+            発話者名と仮配役のキャラクター名が一致すれば自動で表示します。別名の場合はここで対応付けます。検証音声の試聴用で、この台詞の音声生成には使いません。
+          </p>
+          {irodoriError && <p role="alert">{irodoriError}</p>}
+          <fieldset disabled={locked || scriptSpeakers.length === 0}>
+            <legend>同じ発話者の全行を改名</legend>
+            <label>
+              変更前の発話者
+              <select
+                aria-label="一括改名する発話者"
+                value={scriptSpeakers.includes(renameFrom) ? renameFrom : ''}
+                onChange={(event) => setRenameFrom(event.target.value)}
+              >
+                <option value="">発話者を選択</option>
+                {scriptSpeakers.map((speaker) => (
+                  <option key={speaker} value={speaker}>
+                    {speaker}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              新しい発話者名
+              <input
+                aria-label="一括改名後の発話者名"
+                maxLength={100}
+                value={renameTo}
+                onChange={(event) => setRenameTo(event.target.value)}
+              />
+            </label>
+            <button
+              className="secondary-button"
+              disabled={
+                !renameFrom ||
+                !scriptSpeakers.includes(renameFrom) ||
+                !renameTo.trim() ||
+                renameTo.trim() === renameFrom
+              }
+              onClick={renameSpeaker}
+            >
+              {renameFrom
+                ? `${script.lines.filter((line) => line.character?.trim() === renameFrom).length}行の発話者名を変更`
+                : '発話者名をまとめて変更'}
+            </button>
+          </fieldset>
+          {linkedSpeakers.length === 0 && <p>発話者名付きの台本を取り込むと対応付けできます。</p>}
+          {linkedSpeakers.map((speaker) => {
+            const link = speakerLinks.find((item) => item.speaker === speaker);
+            const assignment = irodoriForSpeaker(speaker);
+            return (
+              <div key={speaker}>
+                <label>
+                  {speaker}の仮配役
+                  <select
+                    aria-label={`${speaker}のIrodori仮配役`}
+                    disabled={locked}
+                    value={link?.character ?? ''}
+                    onChange={(event) => linkSpeaker(speaker, event.target.value)}
+                  >
+                    <option value="">名前の一致で自動対応</option>
+                    {link &&
+                      !irodoriAssignments.some((item) => item.character === link.character) && (
+                        <option value={link.character}>
+                          仮配役が見つかりません：{link.character}
+                        </option>
+                      )}
+                    {irodoriAssignments.map((item) => (
+                      <option key={item.character} value={item.character}>
+                        {item.character}：
+                        {irodoriCandidates.find((voice) => voice.id === item.voiceId)!.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <span>
+                  {assignment
+                    ? `表示中：${irodoriCandidates.find((voice) => voice.id === assignment.voiceId)!.name}`
+                    : '対応する仮配役なし'}
+                  {scriptSpeakers.includes(speaker) ? '' : '（現在の台本には発話者なし）'}
+                </span>
+              </div>
+            );
+          })}
+        </section>
         <ol className="evaluation-history">
           {script.lines.map((line, index) => {
             const candidate = scriptCandidate(line),
@@ -880,6 +1064,45 @@ export function VoiceScript({
                   {playingId === line.id ? ' · 連続試聴中' : ''}
                 </strong>
                 {line.character && <p>発話者：{line.character}</p>}
+                <label>
+                  発話者名
+                  <input
+                    aria-label={`第${index + 1}行の発話者名`}
+                    maxLength={100}
+                    disabled={locked}
+                    value={line.character ?? ''}
+                    onChange={(event) =>
+                      editLine(line.id, {
+                        character: event.target.value.trim() ? event.target.value : undefined,
+                      })
+                    }
+                  />
+                </label>
+                {line.character &&
+                  (() => {
+                    const assignment = irodoriForSpeaker(line.character.trim());
+                    if (!assignment) return null;
+                    const voice = irodoriCandidates.find((item) => item.id === assignment.voiceId)!;
+                    const url = irodoriUrl(assignment.voiceId);
+                    return (
+                      <div className="irodori-script-preview">
+                        <p>
+                          Irodori仮配役：{assignment.character} → {voice.name}
+                          （保存済み検証音声の試聴のみ）
+                        </p>
+                        {url ? (
+                          <audio
+                            controls
+                            src={url}
+                            onPlay={pauseOtherAudio}
+                            aria-label={`第${index + 1}行のIrodori仮配役音声`}
+                          />
+                        ) : (
+                          <p>試聴音声は未読み込みです。</p>
+                        )}
+                      </div>
+                    );
+                  })()}
                 <label>
                   キャラクターと場面
                   <select

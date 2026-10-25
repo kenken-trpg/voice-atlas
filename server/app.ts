@@ -1,4 +1,7 @@
 import express, { type ErrorRequestHandler } from 'express';
+import { lstat, readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { voices, catalogReviewedAt } from '../shared/catalog';
 import { analyzeRequestSchema, previewRequestSchema, recommendRequestSchema } from './validation';
@@ -9,6 +12,13 @@ import { createTtsAdapter } from './tts';
 import { castingPreviewSchema } from '../shared/casting';
 import { castingInventory, castingSynthesize } from './tts/casting';
 import { getAivisModelInfo } from './tts/aivis-model-info';
+import { irodoriCandidates } from '../shared/irodori-candidates';
+
+const localIrodoriSamples = new Map<string, string>(
+  (irodoriCandidates as readonly { samples: readonly { file: string; sha256: string }[] }[])
+    .flatMap((voice) => [...voice.samples])
+    .map((sample) => [sample.sha256, sample.file]),
+);
 
 export function createApp(config: Config, fetcher: Fetcher = fetch) {
   const app = express();
@@ -53,6 +63,27 @@ export function createApp(config: Config, fetcher: Fetcher = fetch) {
   };
   app.get('/api/health', (_req, res) => res.json({ ok: true, version: '0.1.0' }));
   app.get('/api/catalog', (_req, res) => res.json({ voices, reviewedAt: catalogReviewedAt }));
+  app.get('/api/irodori-samples/:hash', async (req, res) => {
+    const hash = req.params.hash;
+    const file = localIrodoriSamples.get(hash);
+    if (!file) throw new AppError(404, '検証音声が見つかりません。');
+    const path = fileURLToPath(
+      new URL(`../.local-artifacts/irodori-v41-voice-design-20261024/${file}`, import.meta.url),
+    );
+    let wav: Buffer;
+    try {
+      const info = await lstat(path);
+      if (!info.isFile() || info.size > 4 * 1024 * 1024)
+        throw new AppError(409, '検証音声の形式・サイズを確認してください。');
+      wav = await readFile(path);
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+      throw new AppError(404, 'この端末に検証音声がありません。');
+    }
+    if (createHash('sha256').update(wav).digest('hex') !== hash)
+      throw new AppError(409, '検証音声の内容が記録と一致しません。');
+    res.type('audio/wav').send(wav);
+  });
   // Share only pending checks: an explicit refresh always gets fresh service state.
   let pendingCapabilities: ReturnType<typeof capabilities> | undefined;
   app.get('/api/capabilities', async (_req, res) => {

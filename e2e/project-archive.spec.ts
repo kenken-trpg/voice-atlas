@@ -9,6 +9,8 @@ import {
   projectArchiveLines,
 } from '../shared/project-archive';
 import { makeScriptLibraryEntry } from '../shared/script-library';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 function fixture() {
   const project = projectFixture();
@@ -207,6 +209,114 @@ test('exports saved WAVs and restores into a clean offline browser without gener
     await scriptPanel(other);
     await expect(script.locator(':scope > ol audio')).toHaveCount(2);
     expect(target.calls()).toBe(0);
+  } finally {
+    await fresh.close();
+  }
+});
+
+test('carries selected Irodori samples to a new browser and plays them after reload', async ({
+  page,
+  browser,
+}) => {
+  test.skip(
+    !existsSync(
+      resolve(
+        '.local-artifacts/irodori-v41-voice-design-20261024/sample_20261024_074100_778062_001.wav',
+      ),
+    ),
+  );
+  const seed = projectFixture();
+  seed.documents.script!.lines[0].character = '長老';
+  seed.documents.script!.lines[1].character = 'ナレーター';
+  seed.documents.irodoriSpeakerLinks = [{ speaker: 'ナレーター', character: '長老' }];
+  await page.addInitScript(
+    ({ key, value }) => {
+      if (!localStorage.getItem(key)) localStorage.setItem(key, value);
+    },
+    { key: projectStorageKey, value: JSON.stringify(seed) },
+  );
+  await page.goto('/');
+  const voices = page.getByRole('region', { name: 'Irodori生成済みの声を比較' });
+  await voices.getByRole('button', { name: 'この端末の検証音声を読み込む' }).click();
+  await expect(voices.locator('audio')).toHaveCount(6);
+  await voices.getByRole('button', { name: '作品の候補に保存' }).first().click();
+  await voices.getByRole('button', { name: '作品の候補に保存' }).first().click();
+  const comparison = voices.getByRole('region', { name: 'キャラクターごとのIrodori比較' });
+  await comparison.getByRole('textbox', { name: '比較するキャラクター名' }).fill('長老');
+  await comparison.getByRole('checkbox', { name: '老魔術師' }).check();
+  await comparison.getByRole('checkbox', { name: '企業幹部' }).check();
+  await comparison.getByRole('textbox', { name: 'Irodoriの比較メモ' }).fill('落ち着いた声');
+  await comparison.getByRole('button', { name: 'この声に仮配役' }).first().click();
+  const sourceScript = await scriptPanel(page);
+  await sourceScript
+    .getByRole('combobox', { name: '一括改名する発話者' })
+    .selectOption('ナレーター');
+  await sourceScript.getByRole('textbox', { name: '一括改名後の発話者名' }).fill('案内役');
+  await sourceScript.getByRole('button', { name: '1行の発話者名を変更' }).click();
+  await page.getByText('作品を保存・復元する', { exact: true }).click();
+  const event = page.waitForEvent('download');
+  await page.getByRole('button', { name: '音声付き作品アーカイブを書き出す' }).click();
+  const buffer = await bytes(await event);
+  const parsed = await parseProjectArchive(new Blob([buffer]));
+  expect(parsed.project.documents.irodoriCandidates).toEqual(['old_mage', 'executive']);
+  expect(parsed.project.documents.irodoriComparisons).toEqual([
+    { character: '長老', voiceIds: ['old_mage', 'executive'], note: '落ち着いた声' },
+  ]);
+  expect(parsed.project.documents.irodoriAssignments).toEqual([
+    { character: '長老', voiceId: 'old_mage', reason: '落ち着いた声' },
+  ]);
+  expect(parsed.project.documents.irodoriSpeakerLinks).toEqual([
+    { speaker: '案内役', character: '長老' },
+  ]);
+  expect(parsed.project.documents.script!.lines[1].character).toBe('案内役');
+  expect(parsed.irodoriAudio).toHaveLength(4);
+  const fresh = await browser.newContext();
+  try {
+    const other = await fresh.newPage();
+    await other.goto('/');
+    await other.getByText('作品を保存・復元する', { exact: true }).click();
+    const damaged = Buffer.from(buffer);
+    damaged[damaged.length - 1] ^= 1;
+    await inspect(other, damaged);
+    const archive = other.getByRole('region', { name: '音声付き作品アーカイブ' });
+    await expect(archive.getByRole('alert')).toContainText('Irodoriの候補音声が破損');
+    await inspect(other, buffer);
+    await expect(archive.getByRole('group', { name: '音声付き作品の復元確認' })).toContainText(
+      'Irodori候補音声4件',
+    );
+    await other.evaluate((key) => {
+      const original = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (name, value) {
+        if (name === key) throw new DOMException('full', 'QuotaExceededError');
+        original.call(this, name, value);
+      };
+    }, projectLibraryStorageKey);
+    await archive.getByRole('button', { name: '確認した音声付き作品を復元' }).click();
+    await expect(archive.getByRole('alert')).toContainText('保存容量');
+    await other.reload();
+    const restored = other.getByRole('region', { name: 'Irodori生成済みの声を比較' });
+    await expect(restored.locator('audio')).toHaveCount(0);
+    await other.getByText('作品を保存・復元する', { exact: true }).click();
+    await inspect(other, buffer);
+    await archive.getByRole('button', { name: '確認した音声付き作品を復元' }).click();
+    await expect(restored.locator('audio')).toHaveCount(5);
+    await other.reload();
+    await expect(restored.locator('audio')).toHaveCount(5);
+    await expect(restored.getByText('この作品の候補：2件 / 3件')).toBeVisible();
+    await expect(restored.getByRole('heading', { name: '長老：老魔術師' })).toBeVisible();
+    await expect(restored.getByText('比較メモ：落ち着いた声')).toBeVisible();
+    await restored.getByRole('button', { name: '比較を開く' }).click();
+    await expect(restored.locator('audio')).toHaveCount(9);
+    const script = await scriptPanel(other);
+    await expect(script.getByRole('listitem', { name: '台本の第1行' })).toContainText(
+      'Irodori仮配役：長老 → 老魔術師',
+    );
+    await expect(script.getByRole('listitem', { name: '台本の第2行' })).toContainText(
+      'Irodori仮配役：長老 → 老魔術師',
+    );
+    await expect(script.getByLabel('第2行の発話者名')).toHaveValue('案内役');
+    await expect(script.locator('audio[aria-label="第1行のIrodori仮配役音声"]')).toBeVisible();
+    await expect(script.locator('audio[aria-label="第2行のIrodori仮配役音声"]')).toBeVisible();
   } finally {
     await fresh.close();
   }
@@ -423,7 +533,7 @@ test('rejects corrupt audio and refuses restoration after another tab updates th
   const unsupported = await archiveFile();
   const headerLength = unsupported.readUInt32LE(8);
   const header = JSON.parse(unsupported.toString('utf8', 12, 12 + headerLength));
-  header.version = 2;
+  header.version = 3;
   Buffer.from(JSON.stringify(header)).copy(unsupported, 12);
   await inspect(page, unsupported);
   await expect(archive.getByRole('alert')).toContainText('形式・版');
