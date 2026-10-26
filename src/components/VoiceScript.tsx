@@ -48,6 +48,7 @@ import { ScriptCasting } from './ScriptCasting';
 import { ScriptRecast } from './ScriptRecast';
 import { ScriptSceneSettings } from './ScriptSceneSettings';
 import { ScriptGenerationPlan } from './ScriptGenerationPlan';
+import { scriptGenerationReasons } from '../../shared/script-generation-reasons';
 import { ScriptGenerationPanel } from './ScriptGenerationPanel';
 import {
   startGenerationJob,
@@ -144,6 +145,7 @@ export function VoiceScript({
   const ownedUrls = useRef(new Set<string>());
   const comparisonRef = useRef<HTMLElement>(null);
   const previewRef = useRef(previews);
+  const previousAudioKeys = useRef(new Map<string, string>());
   const controller = useRef<AbortController | null>(null);
   const running = useRef(false),
     importing = useRef(false);
@@ -293,6 +295,7 @@ export function VoiceScript({
     stop();
     const next = { ...previewRef.current };
     for (const id of ids) {
+      if (next[id]) previousAudioKeys.current.set(id, next[id].key);
       delete next[id];
     }
     previewRef.current = next;
@@ -319,6 +322,11 @@ export function VoiceScript({
   function audio(line: ScriptLine) {
     const preview = previews[line.id];
     return preview?.key === scriptAudioKey(line) ? preview : null;
+  }
+  function generationReason(line: ScriptLine) {
+    return audio(line)
+      ? '生成済み'
+      : scriptGenerationReasons(line, previousAudioKeys.current.get(line.id)).join('・');
   }
   function insertLine(index: number, source?: ScriptLine) {
     if (locked || script.lines.length >= 20) return;
@@ -795,6 +803,7 @@ export function VoiceScript({
           onOpen={(value) => {
             discardRecastMemory();
             clear();
+            previousAudioKeys.current.clear();
             publishGeneration(null);
             setExcludedGenerationIds([]);
             cacheGeneration.current++;
@@ -860,6 +869,8 @@ export function VoiceScript({
               stop();
               const next = { ...previewRef.current };
               for (const row of memory.snapshot.rows) {
+                if (next[row.before.id])
+                  previousAudioKeys.current.set(row.before.id, next[row.before.id].key);
                 delete next[row.before.id];
                 const preview = memory.beforeAudio[row.before.id];
                 if (preview?.key === scriptAudioKey(row.before)) next[row.before.id] = preview;
@@ -942,6 +953,7 @@ export function VoiceScript({
         <ScriptGenerationPlan
           lines={script.lines}
           reusable={(line) => Boolean(audio(line))}
+          reason={generationReason}
           excluded={excludedGenerationIds}
           disabled={locked}
           issue={generationIssue}
@@ -1223,6 +1235,7 @@ export function VoiceScript({
                   第{index + 1}行{generatingId === line.id ? ' · 生成中' : ''}
                   {playingId === line.id ? ' · 連続試聴中' : ''}
                 </strong>
+                <p>音声状態：{generationReason(line)}</p>
                 {line.character && <p>発話者：{line.character}</p>}
                 <label>
                   発話者名
@@ -1415,6 +1428,7 @@ export function VoiceScript({
                     disabled={locked}
                     onClick={() => {
                       clear([line.id]);
+                      previousAudioKeys.current.delete(line.id);
                       setScript({
                         ...script,
                         lines: script.lines.filter((row) => row.id !== line.id),

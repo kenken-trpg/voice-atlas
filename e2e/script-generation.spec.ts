@@ -25,12 +25,16 @@ async function expand(page: Page) {
   await page.getByText('台本を作成・試聴する', { exact: true }).click();
   return page.getByRole('region', { name: '台本の試聴', exact: true });
 }
-async function setup(page: Page, respond: (route: Route, count: number) => Promise<void>) {
+async function setup(
+  page: Page,
+  respond: (route: Route, count: number) => Promise<void>,
+  project = fixture,
+) {
   await page.addInitScript(
     ({ key, value }) => {
       if (localStorage.getItem(key) === null) localStorage.setItem(key, value);
     },
-    { key: projectStorageKey, value: JSON.stringify(fixture) },
+    { key: projectStorageKey, value: JSON.stringify(project) },
   );
   await page.route('**/api/casting/voices', (route) =>
     route.fulfill({
@@ -265,4 +269,72 @@ test('allows ready rows to generate after excluding a row with missing text', as
   await generate.click();
   await expect(panel.locator(':scope > ol audio')).toHaveCount(2);
   expect(calls).toEqual(['ほしよみのとう', '続けます。']);
+});
+
+test('shows generation reasons in rows and the plan, accumulates changes, and clears them after success', async ({
+  page,
+}, testInfo) => {
+  const project = structuredClone(fixture);
+  const tuning = structuredClone(base.assignments[0]);
+  tuning.id = crypto.randomUUID();
+  tuning.scene = '調声変更用';
+  tuning.comparison.entries[0].evaluation.candidates[0].recipe.speedScale = 0.7;
+  project.documents.castingBoard.assignments = [tuning, ...base.assignments];
+  const { panel, calls } = await setup(
+    page,
+    (route, count) =>
+      count === 4
+        ? route.fulfill({ status: 502, json: { error: '再生成のテスト失敗' } })
+        : wav(route),
+    project,
+  );
+  const rowState = (index: number) =>
+    panel
+      .getByRole('listitem', { name: `台本の第${index}行`, exact: true })
+      .getByText(/^音声状態：/);
+  const plan = panel.getByRole('region', { name: '生成前の対象確認', exact: true });
+  const planRow = (index: number) =>
+    plan.getByRole('listitem', { name: `生成予定 第${index}行`, exact: true });
+  await expect(rowState(1)).toHaveText('音声状態：未生成');
+  await expect(planRow(1)).toContainText('音声状態：未生成');
+  await panel.getByLabel('第1行の読み上げ文', { exact: true }).fill('生成前の編集');
+  await expect(rowState(1)).toHaveText('音声状態：未生成');
+  await panel.getByRole('button', { name: '未生成の行を台本順に生成', exact: true }).click();
+  await expect(panel.locator(':scope > ol audio')).toHaveCount(3);
+  await panel.getByLabel('第1行のセリフ', { exact: true }).fill('表示のみ変更');
+  await expect(rowState(1)).toHaveText('音声状態：生成済み');
+  await panel.getByLabel('第1行の読み上げ文', { exact: true }).fill('変更したよみ');
+  await expect(rowState(1)).toHaveText('音声状態：読み上げ文変更');
+  await expect(planRow(1)).toContainText('音声状態：読み上げ文変更');
+  await panel.getByLabel('第1行の声', { exact: true }).selectOption(tuning.id);
+  await expect(rowState(1)).toHaveText('音声状態：読み上げ文変更・調声変更');
+  await panel.getByLabel('第1行の声', { exact: true }).selectOption(base.assignments[1].id);
+  await expect(rowState(1)).toHaveText('音声状態：読み上げ文変更・声変更・調声変更');
+  await expect(planRow(1)).toContainText('音声状態：読み上げ文変更・声変更・調声変更');
+  await plan.screenshot({ path: testInfo.outputPath('generation-reasons.png') });
+  await panel.getByRole('button', { name: '第1行を下へ', exact: true }).click();
+  await expect(rowState(2)).toContainText('読み上げ文変更・声変更・調声変更');
+  await expect(rowState(1)).toHaveText('音声状態：生成済み');
+  await panel.getByRole('button', { name: '未生成の行を台本順に生成', exact: true }).click();
+  await expect(panel.getByRole('alert')).toContainText('再生成のテスト失敗');
+  await expect(rowState(2)).toHaveText('音声状態：読み上げ文変更・声変更・調声変更');
+  await panel.getByRole('button', { name: '未生成の行を台本順に生成', exact: true }).click();
+  await expect(rowState(2)).toHaveText('音声状態：生成済み');
+  expect(calls).toHaveLength(5);
+  await panel.getByLabel('第2行の読み上げ文', { exact: true }).fill('再度変更');
+  await expect(rowState(2)).toHaveText('音声状態：読み上げ文変更');
+  await panel.getByLabel('第2行の読み上げ文', { exact: true }).fill('変更したよみ');
+  await expect(rowState(2)).toHaveText('音声状態：音声なし（生成時の条件に戻っています）');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await panel.getByLabel('台本JSONファイル').setInputFiles({
+    name: 'same-ids.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(project.documents.script)),
+  });
+  await expect(rowState(2)).toHaveText('音声状態：音声なし（生成時の条件に戻っています）');
+  await panel.getByRole('button', { name: '台本を保存せず切り替える', exact: true }).click();
+  await expect(rowState(2)).toHaveText('音声状態：未生成');
+  await page.reload();
+  await expand(page);
+  await expect(rowState(2)).toHaveText('音声状態：未生成');
 });
