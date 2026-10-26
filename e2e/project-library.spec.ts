@@ -31,7 +31,7 @@ test('deletes the last project without reviving legacy scripts or showing corrup
   )
     await panel.getByRole('button', { name: '未保存の変更を破棄して削除', exact: true }).click();
   await page.getByText('作品を保存・復元する', { exact: true }).click();
-  await expect(panel.getByRole('listitem')).toHaveCount(0);
+  await expect(panel.getByRole('listitem', { name: /^保存作品 / })).toHaveCount(0);
   await expect(panel.getByRole('alert')).toHaveCount(0);
   await page
     .getByRole('button', { name: 'VOICEVOX・AivisSpeech・ElevenLabsを比較する', exact: true })
@@ -91,12 +91,12 @@ test('creates, protects unsaved edits, switches, renames, duplicates and deletes
   await page.getByText('作品を保存・復元する', { exact: true }).click();
   await expect(panel.getByLabel('保存する作品名')).toHaveValue('作品Aの未保存名（コピー）');
   await panel.getByLabel('作品ライブラリの検索').fill('B改');
-  await expect(panel.getByRole('listitem')).toHaveCount(1);
+  await expect(panel.getByRole('listitem', { name: /^保存作品 / })).toHaveCount(1);
   await panel.getByRole('button', { name: 'この作品を削除', exact: true }).click();
   await panel.getByRole('button', { name: '確認した作品を削除', exact: true }).click();
-  await expect(panel.getByRole('listitem')).toHaveCount(0);
+  await expect(panel.getByRole('listitem', { name: /^保存作品 / })).toHaveCount(0);
   await panel.getByLabel('作品ライブラリの検索').fill('');
-  await expect(panel.getByRole('listitem')).toHaveCount(2);
+  await expect(panel.getByRole('listitem', { name: /^保存作品 / })).toHaveCount(2);
   await panel.screenshot({ path: testInfo.outputPath('project-library.png') });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   const library = await page.evaluate(
