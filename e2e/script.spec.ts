@@ -368,3 +368,60 @@ test('enforces the twenty-row limit for insertion and duplication and copies ung
   await panel.getByRole('button', { name: '第20行を削除', exact: true }).click();
   await expect(panel.getByRole('button', { name: '第1行を複製', exact: true })).toBeEnabled();
 });
+
+test('follows continuous playback only when enabled and moves keyboard focus on demand', async ({
+  page,
+}, testInfo) => {
+  await page.route('**/api/casting/preview', (route) =>
+    route.fulfill({ contentType: 'audio/wav', body: wav() }),
+  );
+  const panel = await open(page);
+  await imported(panel);
+  await panel.getByRole('button', { name: '未生成の行を台本順に生成', exact: true }).click();
+  await expect(panel.locator(':scope > ol audio')).toHaveCount(2);
+  await page.evaluate(() => {
+    const state = window as unknown as { followed: string[] };
+    state.followed = [];
+    const scroll = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (options) {
+      if (this.matches('li[aria-label^="台本の第"]'))
+        state.followed.push(this.getAttribute('aria-label')!);
+      scroll.call(this, options);
+    };
+    HTMLMediaElement.prototype.play = async function () {
+      this.dispatchEvent(new Event('play'));
+    };
+  });
+  const follow = panel.getByRole('checkbox', {
+    name: '連続試聴中の行へ自動スクロール',
+    exact: true,
+  });
+  const jump = panel.getByRole('button', { name: '連続試聴中の行へ移動', exact: true });
+  const row = (index: number) =>
+    panel.getByRole('listitem', { name: `台本の第${index}行`, exact: true });
+  await expect(jump).toBeDisabled();
+  await follow.uncheck();
+  await panel.getByRole('button', { name: '台本順に連続試聴', exact: true }).click();
+  await expect(row(1)).toHaveAttribute('aria-current', 'true');
+  expect(await page.evaluate(() => (window as unknown as { followed: string[] }).followed)).toEqual(
+    [],
+  );
+  await jump.click();
+  await expect(row(1)).toBeFocused();
+  await panel.getByLabel('台本の第1行の試聴', { exact: true }).dispatchEvent('ended');
+  await expect(row(2)).toHaveAttribute('aria-current', 'true');
+  expect(await page.evaluate(() => (window as unknown as { followed: string[] }).followed)).toEqual(
+    ['台本の第1行'],
+  );
+  await follow.check();
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { followed: string[] }).followed))
+    .toEqual(['台本の第1行', '台本の第2行']);
+  await expect(follow).toBeFocused();
+  await jump.click();
+  await expect(row(2)).toBeFocused();
+  await row(2).screenshot({ path: testInfo.outputPath('playing-row.png') });
+  await panel.getByLabel('台本の第2行の試聴', { exact: true }).dispatchEvent('ended');
+  await expect(jump).toBeDisabled();
+  await expect(row(2)).not.toHaveAttribute('aria-current', 'true');
+});

@@ -139,6 +139,12 @@ export function VoiceScript({
   const libraryRef = useRef<ScriptLibraryHandle>(null);
   const [generatingId, setGeneratingId] = useState<string | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
+  const [followPlayback, setFollowPlayback] = useState(true);
+  const rowRefs = useRef(new Map<string, HTMLLIElement>());
+  useEffect(() => {
+    if (playingId && followPlayback)
+      rowRefs.current.get(playingId)?.scrollIntoView({ block: 'center' });
+  }, [playingId, followPlayback]);
   const [previews, setPreviews] = useState<Record<string, Preview>>({});
   const [recastMemory, setRecastMemory] = useState<RecastMemory | null>(null);
   const memoryRef = useRef<RecastMemory | null>(null);
@@ -1023,7 +1029,26 @@ export function VoiceScript({
           <button className="secondary-button" disabled={playingId === null} onClick={stop}>
             台本の連続試聴を停止
           </button>
+          <button
+            className="secondary-button"
+            disabled={playingId === null}
+            onClick={() => {
+              const row = playingId ? rowRefs.current.get(playingId) : null;
+              row?.focus();
+              row?.scrollIntoView({ block: 'center' });
+            }}
+          >
+            連続試聴中の行へ移動
+          </button>
         </div>
+        <label className="script-playback-follow">
+          <input
+            type="checkbox"
+            checked={followPlayback}
+            onChange={(event) => setFollowPlayback(event.target.checked)}
+          />
+          連続試聴中の行へ自動スクロール
+        </label>
         {cloudReview && (
           <div
             className="script-generation"
@@ -1230,7 +1255,16 @@ export function VoiceScript({
               preview = audio(line);
             const chosen = line.assignment;
             return (
-              <li key={line.id} aria-label={`台本の第${index + 1}行`}>
+              <li
+                key={line.id}
+                aria-label={`台本の第${index + 1}行`}
+                tabIndex={-1}
+                aria-current={playingId === line.id ? 'true' : undefined}
+                ref={(node) => {
+                  if (node) rowRefs.current.set(line.id, node);
+                  else rowRefs.current.delete(line.id);
+                }}
+              >
                 <strong>
                   第{index + 1}行{generatingId === line.id ? ' · 生成中' : ''}
                   {playingId === line.id ? ' · 連続試聴中' : ''}

@@ -2973,3 +2973,22 @@ footer small {
   flex: none;
   margin-top: 5px;
 }
+
+.voice-script .evaluation-history > li[aria-current='true'] {
+  background: var(--soft);
+  outline: 1px solid var(--green);
+  outline-offset: 3px;
+}
+.voice-script .evaluation-history > li {
+  scroll-margin-block: 24px;
+}
+
+.voice-script .script-playback-follow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.voice-script .script-playback-follow input {
+  flex: none;
+  margin: 0;
+}
