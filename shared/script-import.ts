@@ -113,6 +113,7 @@ export function resolveScriptImport(
   assignments: CastingAssignment[],
   scope: ImportScope,
   mapping: ReadonlyMap<string, string>,
+  allowUnassigned = false,
 ) {
   const options = scopedImportAssignments(assignments, scope);
   return rows.map((row) => {
@@ -130,7 +131,7 @@ export function resolveScriptImport(
     if (row.text.length > 300) issues.push('セリフは300文字以下にしてください。');
     if (row.character.includes('\0') || row.text.includes('\0'))
       issues.push('使用できない文字があります。');
-    if (!selected)
+    if (!selected && (!allowUnassigned || Boolean(mapping.get(name))))
       issues.push(
         matches.length > 1
           ? '同名の確定設定が複数あります。声を選択してください。'
@@ -146,11 +147,12 @@ export function makeImportedScript(
   assignments: CastingAssignment[],
   scope: ImportScope,
   mapping: ReadonlyMap<string, string>,
+  allowUnassigned = false,
 ) {
   checkCount(rows);
   if (!title.trim() || title.length > 100 || !rows.length)
     throw new Error('台本名と1〜20行のセリフを入力してください。');
-  const resolved = resolveScriptImport(rows, assignments, scope, mapping);
+  const resolved = resolveScriptImport(rows, assignments, scope, mapping, allowUnassigned);
   if (resolved.some((row) => row.issues.length))
     throw new Error('取り込み内容のエラーと声の未割り当てを解消してください。');
   const script = scriptSchema.parse({

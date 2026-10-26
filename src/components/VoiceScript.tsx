@@ -42,6 +42,7 @@ import { ScriptAudioExport } from './ScriptAudioExport';
 import { ScriptLibrary, type ScriptLibraryHandle } from './ScriptLibrary';
 import { ScriptImport } from './ScriptImport';
 import { PronunciationDictionary } from './PronunciationDictionary';
+import { ScriptCasting } from './ScriptCasting';
 import { ScriptRecast } from './ScriptRecast';
 import { ScriptSceneSettings } from './ScriptSceneSettings';
 import { ScriptGenerationPanel } from './ScriptGenerationPanel';
@@ -755,6 +756,12 @@ export function VoiceScript({
               writeWorkspaceDocument(scriptStorageKey, serializeScript(value)),
             )
           }
+        />
+        <ScriptCasting
+          script={script}
+          assignments={assignments}
+          disabled={locked}
+          onApply={applyRecast}
         />
         <ScriptSceneSettings
           script={script}

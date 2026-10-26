@@ -2919,3 +2919,47 @@ footer small {
   margin-top: 24px;
   padding-top: 16px;
 }
+
+.script-casting {
+  margin: 20px 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--soft);
+}
+.script-casting label {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+.script-casting select {
+  width: 100%;
+  min-width: 0;
+}
+.script-casting fieldset {
+  min-width: 0;
+}
+.script-casting p,
+.script-casting li {
+  overflow-wrap: anywhere;
+}
+.script-casting .script-casting-overwrite {
+  display: flex;
+  align-items: flex-start;
+}
+.script-casting-overwrite input[type='checkbox'] {
+  width: auto;
+  flex: none;
+  margin-top: 5px;
+}
+
+.script-import .script-import-unassigned {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.script-import-unassigned input[type='checkbox'] {
+  width: auto;
+  flex: none;
+  margin-top: 5px;
+}

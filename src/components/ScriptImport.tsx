@@ -30,6 +30,7 @@ export function ScriptImport({
   const [source, setSource] = useState('');
   const [title, setTitle] = useState('取り込み台本');
   const [rows, setRows] = useState<ImportedDialogue[] | null>(null);
+  const [allowUnassigned, setAllowUnassigned] = useState(false);
   const [mapping, setMapping] = useState(new Map<string, string>());
   const [project, setProject] = useState(''),
     [scene, setScene] = useState('');
@@ -40,7 +41,9 @@ export function ScriptImport({
   const locked = disabled || loading;
   const scope = { project, scene };
   const options = scopedImportAssignments(assignments, scope);
-  const resolved = rows ? resolveScriptImport(rows, assignments, scope, mapping) : [];
+  const resolved = rows
+    ? resolveScriptImport(rows, assignments, scope, mapping, allowUnassigned)
+    : [];
   const characters = [...new Set(rows?.map((row) => row.character.trim()).filter(Boolean))];
   function invalidate() {
     setRows(null);
@@ -236,6 +239,18 @@ export function ScriptImport({
                 );
               })}
             </fieldset>
+            <label className="script-import-unassigned">
+              <input
+                type="checkbox"
+                checked={allowUnassigned}
+                disabled={locked}
+                onChange={(event) => setAllowUnassigned(event.target.checked)}
+              />
+              声を選んでいない発話者は未配役のまま取り込む
+            </label>
+            <p className="footnote">
+              未配役で取り込んだ行は、台本の「未配役の発話者に声を割り当てる」でまとめて配役できます。名前・セリフのエラーは修正が必要です。
+            </p>
             <p role="status">
               取り込み確認：{rows.length}行 / 要修正
               {resolved.filter((item) => item.issues.length).length}行
@@ -303,6 +318,7 @@ export function ScriptImport({
                     assignments,
                     scope,
                     mapping,
+                    allowUnassigned,
                   );
                   setError('');
                   onImport(script);
