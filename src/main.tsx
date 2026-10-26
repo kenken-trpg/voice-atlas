@@ -701,7 +701,7 @@ function App() {
             aria-controls="casting-workspace"
             onClick={() => setCastingOpen(!castingOpen)}
           >
-            {castingOpen ? '製品横断の比較を閉じる' : 'VOICEVOX・AivisSpeechを比較する'}
+            {castingOpen ? '製品横断の比較を閉じる' : 'VOICEVOX・AivisSpeech・ElevenLabsを比較する'}
           </button>
         </div>
         <div id="casting-workspace">
@@ -834,7 +834,7 @@ function App() {
               </div>
               <div>
                 <strong>AivisSpeech</strong>
-                <p>「VOICEVOX・AivisSpeechを比較する」から接続を確認</p>
+                <p>「VOICEVOX・AivisSpeech・ElevenLabsを比較する」から接続を確認</p>
                 <code>127.0.0.1:10101</code>
                 <small>
                   AivisSpeechを起動してください。接続先は.envのAIVIS_BASE_URLで変更できます。設定後はサーバーを再起動してください。

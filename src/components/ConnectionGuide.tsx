@@ -249,7 +249,7 @@ export function ConnectionGuide({
           </div>
         )}
         <p className="footnote">
-          この試聴では声の採用や台本への登録は行いません。聴き比べるときは「VOICEVOX・AivisSpeechを比較する」を開いてください。
+          この試聴では声の採用や台本への登録は行いません。聴き比べるときは「VOICEVOX・AivisSpeech・ElevenLabsを比較する」を開いてください。
         </p>
       </section>
     </details>

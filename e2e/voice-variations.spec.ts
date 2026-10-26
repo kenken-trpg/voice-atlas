@@ -52,7 +52,9 @@ async function open(page: Page, single = false) {
     }),
   );
   await page.goto('/');
-  await page.getByRole('button', { name: 'VOICEVOX・AivisSpeechを比較する', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'VOICEVOX・AivisSpeech・ElevenLabsを比較する', exact: true })
+    .click();
   await expect(page.getByText(/AivisSpeech：接続済み/)).toBeVisible();
   await page.getByText('キャラクターの採用声ライブラリ', { exact: true }).click();
   const library = page.getByRole('region', { name: '採用声ライブラリ', exact: true });
@@ -130,7 +132,9 @@ test('compares original and adjusted settings with one installed voice and saves
   await page.locator('#casting-text').fill('別のセリフ');
   await expect(candidate.getByLabel('候補Aの元の設定の試聴', { exact: true })).toHaveCount(0);
   await page.reload();
-  await page.getByRole('button', { name: 'VOICEVOX・AivisSpeechを比較する', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'VOICEVOX・AivisSpeech・ElevenLabsを比較する', exact: true })
+    .click();
   await page.getByText('キャラクターの採用声ライブラリ', { exact: true }).click();
   const original = library
     .locator('li')

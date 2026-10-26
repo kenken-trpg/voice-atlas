@@ -95,7 +95,9 @@ async function mockEngines(page: Page, ready: boolean) {
 }
 
 async function scriptPanel(page: Page) {
-  await page.getByRole('button', { name: 'VOICEVOX・AivisSpeechを比較する', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'VOICEVOX・AivisSpeech・ElevenLabsを比較する', exact: true })
+    .click();
   await page.getByText('キャラクターの採用声ライブラリ', { exact: true }).click();
   await page.getByText('台本を作成・試聴する', { exact: true }).click();
   return page.getByRole('region', { name: '台本の試聴', exact: true });
@@ -114,7 +116,9 @@ test('takes three NPCs and ten lines through casting, audio archive and editing 
 }, testInfo) => {
   const generated = await mockEngines(page, true);
   await page.goto('/');
-  await page.getByRole('button', { name: 'VOICEVOX・AivisSpeechを比較する', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'VOICEVOX・AivisSpeech・ElevenLabsを比較する', exact: true })
+    .click();
   await page.getByText('キャラクターの採用声ライブラリ', { exact: true }).click();
   await page.getByLabel('設定比較JSONファイル').setInputFiles(comparisonFile);
   const board = page.getByRole('region', { name: 'キャスティング表', exact: true });

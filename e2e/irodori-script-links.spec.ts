@@ -31,7 +31,9 @@ test('shows matching provisional voices on script rows and saves explicit speake
   await page.goto('/');
   const voices = page.getByRole('region', { name: 'Irodori生成済みの声を比較' });
   await voices.getByRole('button', { name: 'この端末の検証音声を読み込む' }).click();
-  await page.getByRole('button', { name: 'VOICEVOX・AivisSpeechを比較する', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'VOICEVOX・AivisSpeech・ElevenLabsを比較する', exact: true })
+    .click();
   await page.getByText('キャラクターの採用声ライブラリ', { exact: true }).click();
   await page.getByText('台本を作成・試聴する', { exact: true }).click();
   const panel = page.getByRole('region', { name: '台本の試聴', exact: true });
@@ -56,7 +58,9 @@ test('shows matching provisional voices on script rows and saves explicit speake
   await page.getByText('作品を保存・復元する', { exact: true }).click();
   await page.getByRole('button', { name: '作品をブラウザに保存' }).click();
   await page.reload();
-  await page.getByRole('button', { name: 'VOICEVOX・AivisSpeechを比較する', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'VOICEVOX・AivisSpeech・ElevenLabsを比較する', exact: true })
+    .click();
   await page.getByText('キャラクターの採用声ライブラリ', { exact: true }).click();
   await page.getByText('台本を作成・試聴する', { exact: true }).click();
   await expect(first).toContainText('Irodori仮配役：長老 → 企業幹部');

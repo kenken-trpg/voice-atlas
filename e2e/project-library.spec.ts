@@ -33,7 +33,9 @@ test('deletes the last project without reviving legacy scripts or showing corrup
   await page.getByText('作品を保存・復元する', { exact: true }).click();
   await expect(panel.getByRole('listitem')).toHaveCount(0);
   await expect(panel.getByRole('alert')).toHaveCount(0);
-  await page.getByRole('button', { name: 'VOICEVOX・AivisSpeechを比較する', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'VOICEVOX・AivisSpeech・ElevenLabsを比較する', exact: true })
+    .click();
   await page.getByText('キャラクターの採用声ライブラリ', { exact: true }).click();
   await page.getByText('台本を作成・試聴する', { exact: true }).click();
   const script = page.getByRole('region', { name: '台本の試聴', exact: true });

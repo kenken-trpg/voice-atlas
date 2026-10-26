@@ -18,7 +18,9 @@ function file(value: unknown, name = 'history.json') {
 async function open(page: Page, inventory = connected) {
   await page.route('**/api/casting/voices', (route) => route.fulfill({ json: inventory }));
   await page.goto('/');
-  await page.getByRole('button', { name: 'VOICEVOX・AivisSpeechを比較する', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'VOICEVOX・AivisSpeech・ElevenLabsを比較する', exact: true })
+    .click();
   const workspace = page.getByRole('region', { name: '製品横断の比較', exact: true });
   await expect(workspace.locator('#casting-A')).toBeVisible();
   await workspace.getByRole('button', { name: '製品比較の履歴を集計する', exact: true }).click();
@@ -76,7 +78,9 @@ test('merges sessions and archives, filters adoption and exports all records wit
     ]);
   await expect(archive.getByText('集計した製品比較：4件', { exact: true })).toBeVisible();
   await expect(
-    archive.getByText('採用した製品 — VOICEVOX：1件 ／ AivisSpeech：2件', { exact: true }),
+    archive.getByText('採用した製品 — VOICEVOX：1件 ／ AivisSpeech：2件 ／ ElevenLabs：0件', {
+      exact: true,
+    }),
   ).toBeVisible();
   await expect(archive.getByRole('status').filter({ hasText: '重複1件' })).toBeVisible();
   await archive.getByLabel('採用した製品', { exact: true }).selectOption('AivisSpeech');

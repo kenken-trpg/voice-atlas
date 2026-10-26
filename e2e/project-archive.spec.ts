@@ -95,7 +95,7 @@ async function scriptPanel(page: Page) {
   const panel = page.getByRole('region', { name: '台本の試聴', exact: true });
   if (!(await panel.isVisible())) {
     await page
-      .getByRole('button', { name: 'VOICEVOX・AivisSpeechを比較する', exact: true })
+      .getByRole('button', { name: 'VOICEVOX・AivisSpeech・ElevenLabsを比較する', exact: true })
       .click();
     await page.getByText('キャラクターの採用声ライブラリ', { exact: true }).click();
     await page.getByText('台本を作成・試聴する', { exact: true }).click();

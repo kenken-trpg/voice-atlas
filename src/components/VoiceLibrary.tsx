@@ -15,7 +15,7 @@ import {
 } from '../../shared/voice-library';
 import {
   castingKey,
-  castingRecipeFields,
+  castingRecipeSummary,
   type CastingEvaluation,
   type CastingInventory,
   type CastingCandidate,
@@ -290,6 +290,7 @@ export function VoiceLibrary({
             <option value="">すべて</option>
             <option>VOICEVOX</option>
             <option>AivisSpeech</option>
+            <option>ElevenLabs</option>
           </select>
         </label>
         <p role="status">
@@ -310,7 +311,11 @@ export function VoiceLibrary({
             const candidate = libraryCandidate(entry);
             const status = checking
               ? '確認中'
-              : inventory?.voices.some((v) => castingKey(v) === castingKey(candidate.voice))
+              : inventory?.voices.some((v) => castingKey(v) === castingKey(candidate.voice)) ||
+                  (candidate.voice.engine === 'ElevenLabs' &&
+                    inventory?.engines.some(
+                      (engine) => engine.engine === 'ElevenLabs' && engine.ready,
+                    ))
                 ? '試聴可能'
                 : inventory?.engines.find((e) => e.engine === candidate.voice.engine)?.ready
                   ? '未導入'
@@ -338,14 +343,7 @@ export function VoiceLibrary({
                     <p>変更理由：{entry.variation.reason}</p>
                     <details>
                       <summary>派生元の調声値を見る</summary>
-                      <p>
-                        {castingRecipeFields(entry.variation.parent.candidate)
-                          .map(
-                            (field) =>
-                              `${field.label}：${Number((entry.variation!.parent.candidate.recipe as unknown as Record<string, unknown>)[field.key]).toFixed(2)}${field.unit}`,
-                          )
-                          .join(' ／ ')}
-                      </p>
+                      <p>{castingRecipeSummary(entry.variation.parent.candidate)}</p>
                     </details>
                   </>
                 )}
@@ -354,14 +352,7 @@ export function VoiceLibrary({
                   <summary>
                     {entry.variation ? '保存時の調声値・生成情報' : '採用時の調声値・生成情報'}
                   </summary>
-                  <p>
-                    {castingRecipeFields(candidate)
-                      .map(
-                        (field) =>
-                          `${field.label}：${Number((candidate.recipe as unknown as Record<string, unknown>)[field.key]).toFixed(2)}${field.unit}`,
-                      )
-                      .join(' ／ ')}
-                  </p>
+                  <p>{castingRecipeSummary(candidate)}</p>
                   <p>
                     生成エンジン版：
                     {libraryGeneration(entry)?.engineVersion ?? '未取得'}

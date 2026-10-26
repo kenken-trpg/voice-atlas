@@ -45,7 +45,9 @@ function wav() {
 async function open(page: Page) {
   await page.route('**/api/casting/voices', (route) => route.fulfill({ json: inventory() }));
   await page.goto('/');
-  await page.getByRole('button', { name: 'VOICEVOX・AivisSpeechを比較する', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'VOICEVOX・AivisSpeech・ElevenLabsを比較する', exact: true })
+    .click();
   const panel = page.getByRole('region', { name: '製品横断の比較', exact: true });
   await expect(panel.getByText('AivisSpeech：接続済み', { exact: false })).toBeVisible();
   return panel;
@@ -213,7 +215,9 @@ test('clears failed connection inventory and preserves edits across closing the 
   await page.locator('#casting-A-tempoDynamicsScale').fill('0.6');
   await page.getByRole('button', { name: '製品横断の比較を閉じる', exact: true }).click();
   await expect(panel).toBeHidden();
-  await page.getByRole('button', { name: 'VOICEVOX・AivisSpeechを比較する', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'VOICEVOX・AivisSpeech・ElevenLabsを比較する', exact: true })
+    .click();
   await expect(page.locator('#casting-A-tempoDynamicsScale')).toHaveValue('0.6');
   await page.route('**/api/casting/voices', (route) =>
     route.fulfill({ status: 502, json: { error: '接続失敗テスト' } }),

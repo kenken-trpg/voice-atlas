@@ -5,7 +5,7 @@ import { libraryCandidate, libraryText, type VoiceLibraryEntry } from '../../sha
 import {
   castingCandidateSchema,
   castingKey,
-  castingRecipeFields,
+  castingRecipeSummary,
   generationSchema,
   type CastingCandidate,
   type CastingInventory,
@@ -131,7 +131,11 @@ export function LibraryComparison({
     const candidate = libraryCandidate(entry);
     if (!castingCandidateSchema.safeParse(candidate).success) return '現行カタログ対象外';
     if (checking) return '確認中';
-    if (inventory?.voices.some((voice) => castingKey(voice) === castingKey(candidate.voice)))
+    if (
+      inventory?.voices.some((voice) => castingKey(voice) === castingKey(candidate.voice)) ||
+      (candidate.voice.engine === 'ElevenLabs' &&
+        inventory?.engines.some((engine) => engine.engine === 'ElevenLabs' && engine.ready))
+    )
       return '試聴可能';
     return inventory?.engines.find((engine) => engine.engine === candidate.voice.engine)?.ready
       ? '未導入'
@@ -419,6 +423,11 @@ export function LibraryComparison({
               }}
             />
           </label>
+          {pair.some((entry) => libraryCandidate(entry).voice.engine === 'ElevenLabs') && (
+            <p className="footnote">
+              ElevenLabsの候補を生成すると、共通セリフをElevenLabsへ送信し、アカウントの利用枠を消費します。生成ボタンを押すと送信します。
+            </p>
+          )}
           <div className="comparison-candidates">
             {pair.map((entry, index) => {
               const letter = index === 0 ? 'A' : 'B',
@@ -590,12 +599,7 @@ export function LibraryComparison({
                     </p>
                     <p>
                       調声値：
-                      {castingRecipeFields(libraryCandidate(entry))
-                        .map(
-                          (field) =>
-                            `${field.label}：${Number((libraryCandidate(entry).recipe as unknown as Record<string, number>)[field.key]).toFixed(2)}${field.unit}`,
-                        )
-                        .join(' ／ ')}
+                      {castingRecipeSummary(libraryCandidate(entry))}
                     </p>
                     <p>
                       生成エンジン版：{record.auditions[i].generation?.engineVersion ?? '未取得'}

@@ -76,7 +76,9 @@ async function open(page: Page) {
     }),
   );
   await page.goto('/');
-  await page.getByRole('button', { name: 'VOICEVOX・AivisSpeechを比較する', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'VOICEVOX・AivisSpeech・ElevenLabsを比較する', exact: true })
+    .click();
   await expect(page.locator('#casting-A')).toBeVisible();
   await page.getByText('キャラクターの採用声ライブラリ', { exact: true }).click();
   const library = page.getByRole('region', { name: '採用声ライブラリ', exact: true });
@@ -156,7 +158,9 @@ test('compares two settings of the same voice and preserves chosen ID and snapsh
   await expect(page.locator('#casting-A-speedScale')).toHaveValue('1.3');
   await comparison.screenshot({ path: testInfo.outputPath('library-comparison.png') });
   await page.reload();
-  await page.getByRole('button', { name: 'VOICEVOX・AivisSpeechを比較する', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'VOICEVOX・AivisSpeech・ElevenLabsを比較する', exact: true })
+    .click();
   await page.getByText('キャラクターの採用声ライブラリ', { exact: true }).click();
   await expect(
     comparison.getByRole('status').filter({ hasText: '保存設定の比較記録：1件' }),
@@ -299,7 +303,9 @@ test('cancels on closing the workspace, blocks concurrent generation, and recove
   await comparison.getByRole('button', { name: '保存設定のA・Bを生成', exact: true }).click();
   await expect.poll(() => calls).toBe(2);
   await page.getByRole('button', { name: '製品横断の比較を閉じる', exact: true }).click();
-  await page.getByRole('button', { name: 'VOICEVOX・AivisSpeechを比較する', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'VOICEVOX・AivisSpeech・ElevenLabsを比較する', exact: true })
+    .click();
   await expect(
     comparison.getByRole('button', { name: '保存設定のA・Bを生成', exact: true }),
   ).toBeEnabled();

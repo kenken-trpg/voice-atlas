@@ -303,6 +303,8 @@ export function VoiceScript({
   function availability(line: ScriptLine) {
     const candidate = scriptCandidate(line);
     if (!candidate) return '声を選択してください';
+    if (candidate.voice.engine === 'ElevenLabs')
+      return 'ElevenLabsは製品比較画面で試聴してください（台本生成は未対応）';
     if (!castingCandidateSchema.safeParse(candidate).success) return '現行カタログ対象外';
     if (checking) return '確認中';
     if (inventory?.voices.some((voice) => castingKey(voice) === castingKey(candidate.voice)))

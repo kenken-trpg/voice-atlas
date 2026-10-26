@@ -15,7 +15,7 @@ import {
   maxCastingRecords,
   type CastingFilters,
 } from '../../shared/casting-dataset';
-import { castingKey, castingRecipeFields, type CastingEvaluation } from '../../shared/casting';
+import { castingKey, castingRecipeSummary, type CastingEvaluation } from '../../shared/casting';
 import { download } from '../lib/http';
 import { CharacterContext } from './CharacterContext';
 import { AivisModelDetails } from './AivisModelDetails';
@@ -43,7 +43,11 @@ export function CastingEvaluationWorkbench({
   const filtered = useMemo(() => filterCastingEvaluations(records, filters), [records, filters]);
   const summary = useMemo(() => {
     const outcomes = { a: 0, b: 0, tie: 0, undecided: 0 };
-    const adopted = { VOICEVOX: 0, AivisSpeech: 0, ElevenLabs: 0 };
+    const adopted: Record<'VOICEVOX' | 'AivisSpeech' | 'ElevenLabs', number> = {
+      VOICEVOX: 0,
+      AivisSpeech: 0,
+      ElevenLabs: 0,
+    };
     records.forEach((item) => {
       outcomes[item.outcome]++;
       const selected = adoptedCastingCandidate(item);
@@ -189,7 +193,7 @@ export function CastingEvaluationWorkbench({
         </p>
         <p>
           採用した製品 — VOICEVOX：{summary.adopted.VOICEVOX}件 ／ AivisSpeech：
-          {summary.adopted.AivisSpeech}件
+          {summary.adopted.AivisSpeech}件 ／ ElevenLabs：{summary.adopted.ElevenLabs}件
         </p>
       </div>
       <div className="evaluation-filters">
@@ -224,6 +228,7 @@ export function CastingEvaluationWorkbench({
             <option value="all">すべての製品</option>
             <option>VOICEVOX</option>
             <option>AivisSpeech</option>
+            <option>ElevenLabs</option>
           </select>
         </label>
         <label>
@@ -239,6 +244,7 @@ export function CastingEvaluationWorkbench({
             <option value="all">すべての製品</option>
             <option>VOICEVOX</option>
             <option>AivisSpeech</option>
+            <option>ElevenLabs</option>
           </select>
         </label>
         <label>
@@ -342,14 +348,7 @@ export function CastingEvaluationWorkbench({
                       <strong>
                         {j === 0 ? 'A' : 'B'}：{candidate.voice.engine}
                       </strong>
-                      <p className="evaluation-text">
-                        {castingRecipeFields(candidate)
-                          .map(
-                            (field) =>
-                              `${field.label}：${Number((candidate.recipe as unknown as Record<string, unknown>)[field.key]).toFixed(2)}${field.unit}`,
-                          )
-                          .join(' ／ ')}
-                      </p>
+                      <p className="evaluation-text">{castingRecipeSummary(candidate)}</p>
                       <p>
                         {item.generations[j]
                           ? `エンジン版：${item.generations[j]!.engineVersion ?? '未取得'} ／ 確認日時：${new Date(item.generations[j]!.checkedAt).toLocaleString('ja-JP')}`
