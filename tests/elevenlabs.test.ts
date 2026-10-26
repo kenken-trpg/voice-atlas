@@ -50,6 +50,46 @@ const mockFetch = () =>
 afterEach(() => vi.useRealTimers());
 
 describe('ElevenLabs transport and synthesis', () => {
+  it.each([
+    [401, 'missing_permissions', 'models_read', 'Models → Read'],
+    [401, 'missing_permissions', 'voices_read', 'Voices → Read'],
+    [401, 'missing_permissions', 'text_to_speech', 'Text to Speech → Access'],
+    [403, 'insufficient_permissions', 'unknown', '権限が不足'],
+    [401, 'invalid_api_key', '', '無効と判定'],
+    [401, 'quota_exceeded', '', '残クレジット'],
+    [429, 'too_many_concurrent_requests', '', '同時実行数'],
+    [429, 'concurrent_limit_exceeded', '', '同時実行数'],
+    [401, 'unknown', '', '認証'],
+  ])(
+    'classifies %s/%s and exposes only fixed guidance',
+    async (http, status, permission, expected) => {
+      const fetcher = vi.fn<typeof fetch>(async () =>
+        Response.json(
+          {
+            detail: {
+              status,
+              message: `The API key is missing the permission ${permission} ${key} ${input.text}`,
+            },
+          },
+          { status: http },
+        ),
+      );
+      const result = await createElevenLabsClient(key, fetcher).status();
+      expect(result.ready).toBe(false);
+      expect(result.detail).toContain(expected);
+      expect(result.detail).not.toContain(key);
+      expect(result.detail).not.toContain(input.text);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    },
+  );
+  it.each([
+    'not-json',
+    JSON.stringify({ detail: { status: 'missing_permissions', message: 'x'.repeat(17000) } }),
+  ])('falls back for malformed or oversized errors', async (body) => {
+    const fetcher = vi.fn<typeof fetch>(async () => new Response(body, { status: 401 }));
+    expect((await createElevenLabsClient(key, fetcher).status()).detail).toContain('認証');
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
   it('never contacts ElevenLabs without a server key', async () => {
     const fetcher = mockFetch();
     const client = createElevenLabsClient('', fetcher);

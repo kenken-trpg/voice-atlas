@@ -12,7 +12,11 @@ export const maxJsonBytes = 2 * 1024 * 1024;
 export const maxWavBytes = 20 * 1024 * 1024;
 
 // Limit decoded bytes as well as Content-Length (which may be absent or compressed).
-async function readBody(response: Response, limit: number, signal: AbortSignal): Promise<Buffer> {
+export async function readBody(
+  response: Response,
+  limit: number,
+  signal: AbortSignal,
+): Promise<Buffer> {
   if (Number(response.headers.get('content-length')) > limit) {
     await response.body?.cancel();
     throw new AppError(502, 'サービスの応答がサイズ上限を超えました。');

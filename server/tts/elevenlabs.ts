@@ -8,7 +8,14 @@ import {
   elevenLabsVoicePageSchema,
 } from '../../shared/elevenlabs';
 import type { Config } from '../config';
-import { AppError, remoteBytes, maxJsonBytes, maxWavBytes, type Fetcher } from '../remote';
+import {
+  AppError,
+  readBody,
+  remoteBytes,
+  maxJsonBytes,
+  maxWavBytes,
+  type Fetcher,
+} from '../remote';
 
 const api = 'https://api.elevenlabs.io';
 const cacheMs = 30_000;
@@ -50,7 +57,36 @@ const voiceListSchema = z.object({
 });
 type VoicePage = z.infer<typeof elevenLabsVoicePageSchema>;
 
-function upstreamError(status: number) {
+function upstreamError(status: number, code?: string, permission?: string) {
+  if (code === 'missing_permissions' || code === 'insufficient_permissions') {
+    const setting =
+      permission === 'models_read'
+        ? 'Models → Read'
+        : permission === 'voices_read'
+          ? 'Voices → Read'
+          : permission === 'text_to_speech'
+            ? 'Text to Speech → Access'
+            : 'Models → Read、Voices → Read、Text to Speech → Access';
+    return new AppError(
+      502,
+      `ElevenLabsのAPIキーの権限が不足しています。キーの設定で ${setting} を許可して保存してください。`,
+    );
+  }
+  if (code === 'quota_exceeded')
+    return new AppError(
+      429,
+      'ElevenLabsの利用枠が不足しています。アカウントの残クレジットとAPIキーの利用上限を確認してください。',
+    );
+  if (code === 'too_many_concurrent_requests' || code === 'concurrent_limit_exceeded')
+    return new AppError(
+      429,
+      'ElevenLabsの同時実行数の上限です。他の生成が終了してから再実行してください。自動再試行は行いません。',
+    );
+  if (code === 'invalid_api_key')
+    return new AppError(
+      502,
+      'ElevenLabsがAPIキーを無効と判定しました。キーの値全体・有効期限・無効化状態を確認してください（invalid_api_key）。',
+    );
   if (status === 401)
     return new AppError(502, 'ElevenLabsの認証に失敗しました。APIキーを確認してください。');
   if (status === 403)
@@ -121,8 +157,34 @@ export function createElevenLabsClient(apiKey: string, fetcher: Fetcher = fetch)
         );
       }
       if (!response.ok) {
-        await response.body?.cancel();
-        throw upstreamError(response.status);
+        let code: string | undefined;
+        let permission: string | undefined;
+        try {
+          const bytes = await readBody(
+            response,
+            16 * 1024,
+            options?.signal ?? AbortSignal.timeout(8000),
+          );
+          const parsed: unknown = JSON.parse(bytes.toString('utf8'));
+          const result = z
+            .object({
+              detail: z.object({
+                status: z.string().optional(),
+                code: z.string().optional(),
+                message: z.string().optional(),
+              }),
+            })
+            .safeParse(parsed);
+          if (result.success) {
+            code = result.data.detail.status ?? result.data.detail.code;
+            permission = result.data.detail.message
+              ?.match(/\bpermission\s+(models_read|voices_read|text_to_speech)\b/i)?.[1]
+              .toLowerCase();
+          }
+        } catch {
+          // Unknown, oversized or malformed bodies use the fixed HTTP fallback.
+        }
+        throw upstreamError(response.status, code, permission);
       }
       const mime = response.headers.get('content-type')?.split(';')[0].trim().toLowerCase();
       const valid = audio
