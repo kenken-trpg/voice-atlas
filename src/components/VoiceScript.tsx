@@ -631,6 +631,7 @@ export function VoiceScript({
   const recastMissing = missing.filter((line) => recastIds.includes(line.id));
   return (
     <details
+      id="production-script"
       className="voice-script"
       onToggle={(event) => {
         if (event.target === event.currentTarget) setOpened(event.currentTarget.open);

@@ -153,7 +153,12 @@ export function CastingBoard({
       .includes(query.toLocaleLowerCase()),
   );
   return (
-    <section className="library-comparison" aria-label="キャスティング表">
+    <section
+      className="library-comparison"
+      aria-label="キャスティング表"
+      id="production-casting"
+      tabIndex={-1}
+    >
       <h3>作品・場面ごとのキャスティング表</h3>
       <p>
         設定比較の記録から、作品・キャラクター・場面ごとに使う声を100件まで確定できます。設定と比較理由をコピーして保存します。ライブラリの編集・削除後も呼び出せます。音声は保存しません。
