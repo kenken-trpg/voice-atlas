@@ -320,6 +320,30 @@ export function VoiceScript({
     const preview = previews[line.id];
     return preview?.key === scriptAudioKey(line) ? preview : null;
   }
+  function insertLine(index: number, source?: ScriptLine) {
+    if (locked || script.lines.length >= 20) return;
+    stop();
+    const line = source
+      ? { ...structuredClone(source), id: crypto.randomUUID() }
+      : makeScriptLine();
+    const preview = source ? audio(source) : null;
+    if (preview) {
+      const next = {
+        ...previewRef.current,
+        [line.id]: { ...preview, key: scriptAudioKey(line) },
+      };
+      previewRef.current = next;
+      setPreviews(next);
+    }
+    const lines = [...script.lines];
+    lines.splice(index, 0, line);
+    setScript({ ...script, lines });
+    setNotice(
+      source
+        ? `第${index}行を複製し、第${index + 1}行に追加しました。${preview ? '生成済み音声も再利用しています。' : ''}`
+        : `第${index + 1}行に空の行を追加しました。`,
+    );
+  }
   function availability(line: ScriptLine) {
     const candidate = scriptCandidate(line);
     if (!candidate) return '声を選択してください';
@@ -870,10 +894,7 @@ export function VoiceScript({
           <button
             className="secondary-button"
             disabled={locked || script.lines.length >= 20}
-            onClick={() => {
-              stop();
-              setScript({ ...script, lines: [...script.lines, makeScriptLine()] });
-            }}
+            onClick={() => insertLine(script.lines.length)}
           >
             台本に行を追加
           </button>
@@ -1330,6 +1351,27 @@ export function VoiceScript({
                   </label>
                 )}
                 <div className="casting-actions">
+                  <button
+                    className="secondary-button"
+                    disabled={locked || script.lines.length >= 20}
+                    onClick={() => insertLine(index)}
+                  >
+                    第{index + 1}行の前に行を挿入
+                  </button>
+                  <button
+                    className="secondary-button"
+                    disabled={locked || script.lines.length >= 20}
+                    onClick={() => insertLine(index + 1)}
+                  >
+                    第{index + 1}行の後に行を挿入
+                  </button>
+                  <button
+                    className="secondary-button"
+                    disabled={locked || script.lines.length >= 20}
+                    onClick={() => insertLine(index + 1, line)}
+                  >
+                    第{index + 1}行を複製
+                  </button>
                   <button
                     className="secondary-button"
                     disabled={
