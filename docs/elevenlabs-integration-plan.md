@@ -105,16 +105,16 @@ ElevenLabsは外部SaaSである。送信前に、入力した台詞がElevenLab
 
 新しい依存ライブラリーは追加せず、既存の`fetch`、`remoteJson`、`remoteBytes`、Zodスキーマで実装する。連携を次の責務に分ける。
 
-| 責務 | 主なファイル | 変更内容 |
-| --- | --- | --- |
-| 製品契約 | `shared/elevenlabs.ts`（新規） | ElevenLabs固有の声、モデル、調声、生成情報スキーマ |
-| 共通比較契約 | `shared/casting.ts` | engine union、候補、世代情報、インベントリーの拡張 |
-| 外部API | `server/tts/elevenlabs.ts`（新規） | キー認証、声/モデル取得、音声合成、応答検証 |
-| 集約処理 | `server/tts/casting.ts` | サービス状態の追加とElevenLabs候補の合成分岐 |
-| 設定 | `server/config.ts`、`.env.example` | サーバー専用APIキー |
-| HTTP | `server/app.ts` | 接続情報、声/モデル取得、プレビュー経路 |
-| UI | `CastingWorkspace.tsx`、`ConnectionGuide.tsx`、調声表示部 | SaaS接続状態、候補選択、クラウド送信表示 |
-| データ横断 | `shared/voice-library.ts`、`casting-dataset.ts`、`project.ts`、`project-archive.ts`、台本関連 | 新engineの保存、読込、復元、音声条件キー対応 |
+| 責務         | 主なファイル                                                                                  | 変更内容                                           |
+| ------------ | --------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| 製品契約     | `shared/elevenlabs.ts`（新規）                                                                | ElevenLabs固有の声、モデル、調声、生成情報スキーマ |
+| 共通比較契約 | `shared/casting.ts`                                                                           | engine union、候補、世代情報、インベントリーの拡張 |
+| 外部API      | `server/tts/elevenlabs.ts`（新規）                                                            | キー認証、声/モデル取得、音声合成、応答検証        |
+| 集約処理     | `server/tts/casting.ts`                                                                       | サービス状態の追加とElevenLabs候補の合成分岐       |
+| 設定         | `server/config.ts`、`.env.example`                                                            | サーバー専用APIキー                                |
+| HTTP         | `server/app.ts`                                                                               | 接続情報、声/モデル取得、プレビュー経路            |
+| UI           | `CastingWorkspace.tsx`、`ConnectionGuide.tsx`、調声表示部                                     | SaaS接続状態、候補選択、クラウド送信表示           |
+| データ横断   | `shared/voice-library.ts`、`casting-dataset.ts`、`project.ts`、`project-archive.ts`、台本関連 | 新engineの保存、読込、復元、音声条件キー対応       |
 
 実装PRは「共通スキーマ・サーバークライアント」「試聴UI」「保存データと台本」の3段階に分ける。各段階でElevenLabs以外の挙動を変えない。
 
@@ -125,19 +125,19 @@ ElevenLabsをengine discriminatorに`ElevenLabs`として追加する。製品�
 ```ts
 type ElevenLabsVoice = {
   engine: 'ElevenLabs';
-  voiceId: string;       // API voice_id。大小文字を保持する
-  name: string;          // 取得時の表示名スナップショット
-  category?: string;     // UI表示用。履歴上は任意
+  voiceId: string; // API voice_id。大小文字を保持する
+  name: string; // 取得時の表示名スナップショット
+  category?: string; // UI表示用。履歴上は任意
 };
 
 type ElevenLabsRecipe = {
   engine: 'ElevenLabs';
   modelId: string;
-  stability: number;       // 0..1
+  stability: number; // 0..1
   similarityBoost: number; // 0..1
-  style: number;           // 0..1。モデルが対応する場合のみ表示/送信
-  useSpeakerBoost: boolean;// モデルが対応する場合のみ表示/送信
-  seed: number | null;     // 0..4294967295。初期値null
+  style: number; // 0..1。モデルが対応する場合のみ表示/送信
+  useSpeakerBoost: boolean; // モデルが対応する場合のみ表示/送信
+  seed: number | null; // 0..4294967295。初期値null
   outputFormat: 'pcm_22050';
 };
 ```
@@ -197,12 +197,12 @@ synthesize(input: {
 
 既存のAPIは互換性を保ち、読み取り用の補助エンドポイントを追加する。
 
-| Method / path | 認証 | 入力 | 出力 |
-| --- | --- | --- | --- |
-| `GET /api/casting/voices` | ローカルアプリ | なし | 既存`engines`へElevenLabs接続状態を追加。ElevenLabsの声一覧は含めない |
-| `GET /api/casting/elevenlabs/voices` | ローカルアプリ | `search`最大100字、`cursor`任意 | 最大50声、`hasMore`、opaque `nextCursor` |
-| `GET /api/casting/elevenlabs/models` | ローカルアプリ | なし | 合成対応モデル、対応調声、最大文字数、言語一覧 |
-| `POST /api/casting/preview` | ローカルアプリ | 拡張`castingPreviewSchema`、台詞最大300字を初版維持 | WAVと既存生成ヘッダー |
+| Method / path                        | 認証           | 入力                                                | 出力                                                                  |
+| ------------------------------------ | -------------- | --------------------------------------------------- | --------------------------------------------------------------------- |
+| `GET /api/casting/voices`            | ローカルアプリ | なし                                                | 既存`engines`へElevenLabs接続状態を追加。ElevenLabsの声一覧は含めない |
+| `GET /api/casting/elevenlabs/voices` | ローカルアプリ | `search`最大100字、`cursor`任意                     | 最大50声、`hasMore`、opaque `nextCursor`                              |
+| `GET /api/casting/elevenlabs/models` | ローカルアプリ | なし                                                | 合成対応モデル、対応調声、最大文字数、言語一覧                        |
+| `POST /api/casting/preview`          | ローカルアプリ | 拡張`castingPreviewSchema`、台詞最大300字を初版維持 | WAVと既存生成ヘッダー                                                 |
 
 - 既存`GET /api/casting/voices`はVOICEVOX/AivisSpeechの部分失敗を保持する。ElevenLabsキー不設定・上流停止も個別engineの`ready: false`へ反映し、全体のHTTP 500にはしない。
 - `CastingInventory.engines`は3製品の固定順とし、`detail`は秘密を含まない固定メッセージにする。既存のvoice上限200件は変更しない。ElevenLabs専用声APIが`page_size=50`と上流のnext tokenを管理し、UIは検索・ページングで取得する。cursorは長さ・文字種を検査し、APIキーや内部状態を含めない。
