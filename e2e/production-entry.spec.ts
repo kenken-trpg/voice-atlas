@@ -20,6 +20,16 @@ test('production entry opens nested workspaces and preserves edits across naviga
   await expect(page.locator('#workspace')).toBeFocused();
   await entry.getByRole('button', { name: '作品を管理・保存する' }).click();
   const panel = page.getByRole('region', { name: '作品の保存と復元', exact: true });
+  await expect(panel.getByRole('region', { name: '保存方法の選び方' })).toContainText(
+    '音声は含みません',
+  );
+  await panel.getByRole('button', { name: '台本音声の保存へ進む' }).click();
+  await expect(page.locator('#production-audio-storage > summary')).toBeFocused();
+  await expect(
+    page.getByRole('button', { name: '台本音声をブラウザに保存', exact: true }),
+  ).toBeVisible();
+  await entry.getByRole('button', { name: '保存・再開へ進む' }).click();
+  await expect(page.locator('#project-management > summary')).toBeFocused();
   await panel.getByLabel('保存する作品名').fill('星読みの塔');
   await panel.getByRole('button', { name: '作品をブラウザに保存', exact: true }).click();
   await expect(entry).toContainText('現在の作品：星読みの塔');

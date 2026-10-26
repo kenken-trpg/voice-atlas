@@ -615,7 +615,9 @@ function App() {
           ? 'workspace'
           : step === 'casting'
             ? 'production-casting'
-            : 'production-script',
+            : step === 'audio-storage'
+              ? 'production-audio-storage'
+              : 'production-script',
       );
       if (!target) return;
       let parent = target.parentElement;

@@ -18,7 +18,7 @@ import { download } from '../lib/http';
 import { ProjectLibrary } from './ProjectLibrary';
 import { ProjectArchive } from './ProjectArchive';
 
-export type ProductionStep = 'discovery' | 'casting' | 'script';
+export type ProductionStep = 'discovery' | 'casting' | 'script' | 'audio-storage';
 
 export function ProjectPanel({ onNavigate }: { onNavigate: (step: ProductionStep) => void }) {
   const { initial, loadError, capture, ensureIdle, commit, transition } = useProject();
@@ -192,6 +192,14 @@ export function ProjectPanel({ onNavigate }: { onNavigate: (step: ProductionStep
       if (fileRef.current) fileRef.current.value = '';
     }
   }
+  function openProjectManagement() {
+    const panel = document.getElementById('project-management') as HTMLDetailsElement | null;
+    if (panel) {
+      panel.open = true;
+      panel.scrollIntoView({ block: 'start' });
+      panel.querySelector('summary')?.focus();
+    }
+  }
   return (
     <>
       <section className="production-guide" aria-label="制作の入口">
@@ -209,19 +217,7 @@ export function ProjectPanel({ onNavigate }: { onNavigate: (step: ProductionStep
                   : '声や台本を作ったら、作品として保存して再開できます。'}
             </p>
           </div>
-          <button
-            className="secondary-button"
-            onClick={() => {
-              const panel = document.getElementById(
-                'project-management',
-              ) as HTMLDetailsElement | null;
-              if (panel) {
-                panel.open = true;
-                panel.scrollIntoView({ block: 'start' });
-                panel.querySelector('summary')?.focus();
-              }
-            }}
-          >
+          <button className="secondary-button" onClick={openProjectManagement}>
             作品を管理・保存する
           </button>
         </div>
@@ -253,6 +249,16 @@ export function ProjectPanel({ onNavigate }: { onNavigate: (step: ProductionStep
                 台本へ進む
               </button>
             </li>
+            <li>
+              <span className="eyebrow">STEP 04</span>
+              <h3>保存して再開する</h3>
+              <p>
+                作品を保存し、台本欄で音声も保存します。別のブラウザへ移すときは音声付き作品アーカイブを書き出します。
+              </p>
+              <button className="secondary-button" onClick={openProjectManagement}>
+                保存・再開へ進む
+              </button>
+            </li>
           </ol>
         </nav>
         <p className="footnote">
@@ -266,6 +272,20 @@ export function ProjectPanel({ onNavigate }: { onNavigate: (step: ProductionStep
         </summary>
         <section aria-label="作品の保存と復元">
           <h2>声・配役・台本をまとめて保存</h2>
+          <section aria-label="保存方法の選び方">
+            <h3>次に使う場所に合わせて保存</h3>
+            <ul>
+              <li>このブラウザで編集を続ける：作品をブラウザに保存します。</li>
+              <li>生成した台本音声も残す：作品の保存後、台本欄で音声をブラウザに保存します。</li>
+              <li>
+                別のブラウザで音声も使う：音声の保存後、音声付き作品アーカイブを書き出します。
+              </li>
+              <li>設定と台本だけをバックアップする：作品JSONを書き出します。音声は含みません。</li>
+            </ul>
+            <button className="secondary-button" onClick={() => onNavigate('audio-storage')}>
+              台本音声の保存へ進む
+            </button>
+          </section>
           <ProjectLibrary
             disabled={locked || !!pending}
             onRequest={request}

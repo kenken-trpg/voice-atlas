@@ -649,7 +649,7 @@ export function VoiceScript({
         </p>
         {error && <p role="alert">{error}</p>}
         {notice && <p role="status">{notice}</p>}
-        <details>
+        <details id="production-audio-storage">
           <summary>台本音声の保存と再利用</summary>
           <section aria-label="台本音声の保存と再利用">
             <p>

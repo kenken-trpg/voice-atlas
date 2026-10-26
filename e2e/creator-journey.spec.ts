@@ -95,11 +95,7 @@ async function mockEngines(page: Page, ready: boolean) {
 }
 
 async function scriptPanel(page: Page) {
-  await page
-    .getByRole('button', { name: 'VOICEVOX・AivisSpeech・ElevenLabsを比較する', exact: true })
-    .click();
-  await page.getByText('キャラクターの採用声ライブラリ', { exact: true }).click();
-  await page.getByText('台本を作成・試聴する', { exact: true }).click();
+  await page.getByRole('button', { name: '台本へ進む', exact: true }).click();
   return page.getByRole('region', { name: '台本の試聴', exact: true });
 }
 
@@ -131,7 +127,7 @@ test('takes three NPCs and ten lines through casting, audio archive and editing 
     ).toBeVisible();
   }
   const script = page.getByRole('region', { name: '台本の試聴', exact: true });
-  await page.getByText('台本を作成・試聴する', { exact: true }).click();
+  await page.getByRole('button', { name: '台本へ進む', exact: true }).click();
   await script.getByLabel('台本名').fill('導入の会話');
   for (let index = 0; index < 10; index++) {
     await script.getByRole('button', { name: '台本に行を追加', exact: true }).click();
@@ -143,7 +139,7 @@ test('takes three NPCs and ten lines through casting, audio archive and editing 
       .fill(`第${index + 1}行のセリフです。`);
   }
   const project = page.getByRole('region', { name: '作品の保存と復元', exact: true });
-  await page.getByText('作品を保存・復元する', { exact: true }).click();
+  await page.getByRole('button', { name: '保存・再開へ進む', exact: true }).click();
   await project.getByLabel('保存する作品名').fill(work);
   await project.getByRole('button', { name: '作品をブラウザに保存', exact: true }).click();
   await expect(project.getByText('作品はブラウザに保存済みです', { exact: true })).toBeVisible();
