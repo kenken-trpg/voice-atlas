@@ -439,3 +439,56 @@ test('enforces cache capacity and ignores stored provenance that does not match 
   await expect(panel.locator(':scope > ol audio')).toHaveCount(1);
   expect(calls()).toBe(2);
 });
+
+test('inserts and duplicates rows, retaining independent audio through moves, save and restore', async ({
+  page,
+}) => {
+  const { panel, calls } = await setup(page);
+  await panel.getByRole('button', { name: '未生成の行を台本順に生成', exact: true }).click();
+  await expect(panel.locator(':scope > ol audio')).toHaveCount(2);
+  await panel.getByLabel('第1行の読み上げ文を別に指定', { exact: true }).check();
+  const original = await panel.getByLabel('台本の第1行の試聴', { exact: true }).getAttribute('src');
+  await panel.getByRole('button', { name: '第1行を複製', exact: true }).click();
+  await expect(panel.getByLabel('台本の第2行の試聴', { exact: true })).toHaveAttribute(
+    'src',
+    original!,
+  );
+  await expect(panel.getByLabel('第2行の読み上げ文', { exact: true })).toHaveValue(
+    fixture.documents.script!.lines[0].text,
+  );
+  await panel.getByRole('button', { name: '第1行の前に行を挿入', exact: true }).click();
+  await expect(panel.getByLabel('第1行のセリフ', { exact: true })).toHaveValue('');
+  await expect(panel.getByLabel('第1行の声', { exact: true })).toHaveValue('');
+  await panel.getByRole('button', { name: '第1行を削除', exact: true }).click();
+  await panel.getByRole('button', { name: '第3行の後に行を挿入', exact: true }).click();
+  await expect(panel.getByLabel('第4行のセリフ', { exact: true })).toHaveValue('');
+  await panel.getByRole('button', { name: '第4行を削除', exact: true }).click();
+  await panel.getByRole('button', { name: '第2行を下へ', exact: true }).click();
+  await expect(panel.getByLabel('台本の第3行の試聴', { exact: true })).toHaveAttribute(
+    'src',
+    original!,
+  );
+  await panel.getByRole('button', { name: '台本の全行をWAVに結合', exact: true }).click();
+  await expect(panel.getByRole('link', { name: '台本全体のWAVを保存', exact: true })).toBeVisible();
+  await saveProject(page);
+  const cache = await openCache(panel);
+  await cache.getByRole('button', { name: '台本音声をブラウザに保存', exact: true }).click();
+  await expect(
+    panel.getByRole('status').filter({ hasText: '3行の音声をこのブラウザに保存' }),
+  ).toBeVisible();
+  await page.reload();
+  await expand(page);
+  await expect(panel.locator(':scope > ol audio')).toHaveCount(3);
+  await expect(panel.getByLabel('第2行のセリフ', { exact: true })).toHaveValue(
+    fixture.documents.script!.lines[1].text,
+  );
+  await panel.getByLabel('第3行の読み上げ文', { exact: true }).fill('複製先だけ変更');
+  await expect(panel.locator(':scope > ol audio')).toHaveCount(2);
+  await expect(panel.getByLabel('台本の第1行の試聴', { exact: true })).toBeVisible();
+  await panel.getByRole('button', { name: '未生成の行を台本順に生成', exact: true }).click();
+  await expect(panel.locator(':scope > ol audio')).toHaveCount(3);
+  expect(calls()).toBe(3);
+  await panel.getByRole('button', { name: '第1行を削除', exact: true }).click();
+  await expect(panel.locator(':scope > ol audio')).toHaveCount(2);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});

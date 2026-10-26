@@ -342,3 +342,29 @@ test('rejects invalid imports and quota failures atomically and enforces row lim
   await expect(panel.getByRole('button', { name: '第2行を生成', exact: true })).toBeDisabled();
   expect(calls).toBe(2);
 });
+
+test('enforces the twenty-row limit for insertion and duplication and copies ungenerated settings', async ({
+  page,
+}) => {
+  const panel = await open(page);
+  await imported(panel);
+  await panel.getByRole('button', { name: '第1行を複製', exact: true }).click();
+  const saved = await exported(page, panel);
+  expect(saved.lines[1]).toEqual({ ...saved.lines[0], id: saved.lines[1].id });
+  expect(saved.lines[1].id).not.toBe(saved.lines[0].id);
+  expect(saved.lines[1].assignment).toEqual(fixture.script.lines[0].assignment);
+  await expect(panel.locator(':scope > ol audio')).toHaveCount(0);
+  for (let i = 3; i < 20; i++)
+    await panel.getByRole('button', { name: '台本に行を追加', exact: true }).click();
+  for (const name of [
+    '台本に行を追加',
+    '第1行を複製',
+    '第1行の前に行を挿入',
+    '第20行の後に行を挿入',
+  ])
+    await expect(panel.getByRole('button', { name, exact: true })).toBeDisabled();
+  await expect(panel.getByRole('button', { name: '第1行を上へ', exact: true })).toBeDisabled();
+  await expect(panel.getByRole('button', { name: '第20行を下へ', exact: true })).toBeDisabled();
+  await panel.getByRole('button', { name: '第20行を削除', exact: true }).click();
+  await expect(panel.getByRole('button', { name: '第1行を複製', exact: true })).toBeEnabled();
+});
