@@ -88,7 +88,7 @@ export function libraryRecipeDifferences(entries: [VoiceLibraryEntry, VoiceLibra
   const fields = candidates.map(castingRecipeFields);
   const keys = [...new Set(fields.flatMap((group) => group.map((field) => field.key)))];
   const sameEngine = candidates[0].recipe.engine === candidates[1].recipe.engine;
-  return keys.flatMap((key) => {
+  const localDifferences = keys.flatMap((key) => {
     const a = fields[0].find((field) => field.key === key),
       b = fields[1].find((field) => field.key === key);
     const va = a ? Number((candidates[0].recipe as unknown as Record<string, number>)[key]) : null;
@@ -103,4 +103,36 @@ export function libraryRecipeDifferences(entries: [VoiceLibraryEntry, VoiceLibra
       },
     ];
   });
+  const cloudFields = [
+    ['modelId', '合成モデル'],
+    ['stability', '安定性'],
+    ['similarityBoost', '類似度'],
+    ['style', 'スタイル'],
+    ['useSpeakerBoost', '話者ブースト'],
+    ['seed', 'シード'],
+    ['outputFormat', '出力形式'],
+  ] as const;
+  const cloudDifferences = cloudFields.flatMap(([key, label]) => {
+    const values = candidates.map((candidate) =>
+      candidate.recipe.engine === 'ElevenLabs' ? candidate.recipe[key] : undefined,
+    );
+    if (values.every((value) => value === undefined) || (sameEngine && values[0] === values[1]))
+      return [];
+    const display = (value: (typeof values)[number]) =>
+      value === undefined
+        ? '対応項目なし'
+        : `${label}：${value === null ? '未指定' : typeof value === 'boolean' ? (value ? '有効' : '無効') : value}`;
+    return [
+      {
+        key,
+        a: display(values[0]),
+        b: display(values[1]),
+        delta:
+          sameEngine && typeof values[0] === 'number' && typeof values[1] === 'number'
+            ? Number((values[1] - values[0]).toPrecision(12))
+            : null,
+      },
+    ];
+  });
+  return [...localDifferences, ...cloudDifferences];
 }

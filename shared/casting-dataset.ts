@@ -133,6 +133,9 @@ export function filterCastingEvaluations(records: CastingEvaluation[], filter: C
       ),
       ...item.generations.map((info) => info?.engineVersion ?? ''),
       ...item.candidates.map((candidate) =>
+        candidate.recipe.engine === 'ElevenLabs' ? candidate.recipe.modelId : '',
+      ),
+      ...item.candidates.map((candidate) =>
         candidate.modelInfo
           ? [
               candidate.modelInfo.modelName,
@@ -242,6 +245,13 @@ export function castingEvaluationsCsv(records: CastingEvaluation[]) {
         'model_links',
         'model_source',
         'model_checked_at',
+        'elevenlabs_model_id',
+        'stability',
+        'similarity_boost',
+        'elevenlabs_style',
+        'use_speaker_boost',
+        'seed',
+        'output_format',
       ].map((field) => `${prefix}_${field}`),
     ),
   ];
@@ -264,16 +274,18 @@ export function castingEvaluationsCsv(records: CastingEvaluation[]) {
           info = item.generations[i];
         return [
           voice.engine,
-          voice.engine === 'VOICEVOX' ? voice.voiceId : null,
+          voice.engine !== 'AivisSpeech' ? voice.voiceId : null,
           voice.engine === 'AivisSpeech' ? voice.speakerUuid : null,
           voice.name,
           voice.style,
           ...fields.map((field) =>
-            field === 'tempoDynamicsScale'
-              ? candidate.recipe.engine === 'AivisSpeech'
-                ? candidate.recipe.tempoDynamicsScale
-                : null
-              : candidate.recipe[field],
+            candidate.recipe.engine === 'ElevenLabs'
+              ? null
+              : field === 'tempoDynamicsScale'
+                ? candidate.recipe.engine === 'AivisSpeech'
+                  ? candidate.recipe.tempoDynamicsScale
+                  : null
+                : candidate.recipe[field],
           ),
           info?.engineVersion ?? null,
           info?.checkedAt ?? null,
@@ -287,6 +299,17 @@ export function castingEvaluationsCsv(records: CastingEvaluation[]) {
           candidate.modelInfo ? JSON.stringify(candidate.modelInfo.links) : null,
           candidate.modelInfo?.source ?? null,
           candidate.modelInfo?.checkedAt ?? null,
+          ...(candidate.recipe.engine === 'ElevenLabs'
+            ? [
+                candidate.recipe.modelId,
+                candidate.recipe.stability,
+                candidate.recipe.similarityBoost,
+                candidate.recipe.style,
+                String(candidate.recipe.useSpeakerBoost),
+                candidate.recipe.seed,
+                candidate.recipe.outputFormat,
+              ]
+            : Array<null>(7).fill(null)),
         ];
       }),
     ];

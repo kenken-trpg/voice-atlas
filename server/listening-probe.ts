@@ -46,7 +46,8 @@ async function main() {
       item.engine === values.engine &&
       (item.engine === 'VOICEVOX'
         ? item.voiceId === values['voice-id']
-        : item.speakerUuid.toLowerCase() === values['speaker-uuid']?.toLowerCase() &&
+        : item.engine === 'AivisSpeech' &&
+          item.speakerUuid.toLowerCase() === values['speaker-uuid']?.toLowerCase() &&
           item.style === values.style),
   );
   if (!voice)

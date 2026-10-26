@@ -43,7 +43,7 @@ export function CastingEvaluationWorkbench({
   const filtered = useMemo(() => filterCastingEvaluations(records, filters), [records, filters]);
   const summary = useMemo(() => {
     const outcomes = { a: 0, b: 0, tie: 0, undecided: 0 };
-    const adopted = { VOICEVOX: 0, AivisSpeech: 0 };
+    const adopted = { VOICEVOX: 0, AivisSpeech: 0, ElevenLabs: 0 };
     records.forEach((item) => {
       outcomes[item.outcome]++;
       const selected = adoptedCastingCandidate(item);

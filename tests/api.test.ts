@@ -1033,7 +1033,11 @@ describe('cross-product casting API', () => {
     const response = await fetch(base + '/api/casting/voices');
     expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body.engines.every((engine: { ready: boolean }) => engine.ready)).toBe(true);
+    expect(body.engines).toMatchObject([
+      { engine: 'VOICEVOX', ready: true },
+      { engine: 'AivisSpeech', ready: true },
+      { engine: 'ElevenLabs', ready: false, detail: expect.stringContaining('未設定') },
+    ]);
     expect(body.voices).toHaveLength(2);
     expect(
       body.voices.find((voice: { engine: string }) => voice.engine === 'AivisSpeech'),
