@@ -233,6 +233,8 @@ test('distinguishes absent and omitted terms and rejects unsafe metadata in impo
     mimeType: 'application/json',
     buffer: Buffer.from(JSON.stringify(saved)),
   });
-  await expect(workspace.getByRole('alert')).toContainText('現在の作業は保持');
+  await expect(
+    workspace.getByRole('alert').filter({ hasText: '比較セッションJSONの形式' }),
+  ).toContainText('現在の作業は保持');
   await expect(page.locator('#casting-A-tempoDynamicsScale')).toHaveValue('0.64');
 });
