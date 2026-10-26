@@ -5,6 +5,7 @@ import type { AivisModelInfo } from '../../shared/aivis-model-info';
 export function ScriptGenerationPlan({
   lines,
   reusable,
+  reason,
   excluded,
   disabled,
   issue,
@@ -13,6 +14,7 @@ export function ScriptGenerationPlan({
 }: {
   lines: ScriptLine[];
   reusable: (line: ScriptLine) => boolean;
+  reason: (line: ScriptLine) => string;
   excluded: string[];
   disabled: boolean;
   issue: (line: ScriptLine) => string | null;
@@ -54,6 +56,7 @@ export function ScriptGenerationPlan({
                   第{index + 1}行 · {excluded.includes(line.id) ? '今回は生成しない' : '生成対象'}
                 </label>
               )}
+              <p>音声状態：{reason(line)}</p>
               <p>
                 {line.character ?? line.assignment?.character ?? '発話者未設定'} ·{' '}
                 {candidate ? `${candidate.voice.engine} / ${candidate.voice.name}` : '声が未設定'}

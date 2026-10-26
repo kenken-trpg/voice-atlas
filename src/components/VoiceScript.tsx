@@ -48,6 +48,7 @@ import { ScriptCasting } from './ScriptCasting';
 import { ScriptRecast } from './ScriptRecast';
 import { ScriptSceneSettings } from './ScriptSceneSettings';
 import { ScriptGenerationPlan } from './ScriptGenerationPlan';
+import { scriptGenerationReasons } from '../../shared/script-generation-reasons';
 import { ScriptGenerationPanel } from './ScriptGenerationPanel';
 import {
   startGenerationJob,
@@ -62,6 +63,13 @@ import { makeRecastSnapshot, undoScriptRecast } from '../../shared/script-recast
 import { ScriptRecastHistory, type RecastMemory, type ScriptPreview } from './ScriptRecastHistory';
 
 type Preview = ScriptPreview;
+type DeletedLine = {
+  line: ScriptLine;
+  index: number;
+  preview: Preview | null;
+  previousKey?: string;
+  excluded: boolean;
+};
 export function VoiceScript({
   assignments,
   disabled,
@@ -138,12 +146,29 @@ export function VoiceScript({
   const libraryRef = useRef<ScriptLibraryHandle>(null);
   const [generatingId, setGeneratingId] = useState<string | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
+  const [followPlayback, setFollowPlayback] = useState(true);
+  const rowRefs = useRef(new Map<string, HTMLLIElement>());
+  const focusRow = useRef<string | null>(null);
+  const [deletedLine, setDeletedLine] = useState<DeletedLine | null>(null);
+  const deletedLineRef = useRef<DeletedLine | null>(null);
+  useLayoutEffect(() => {
+    if (focusRow.current) {
+      rowRefs.current.get(focusRow.current)?.focus();
+      rowRefs.current.get(focusRow.current)?.scrollIntoView({ block: 'center' });
+      focusRow.current = null;
+    }
+  }, [script]);
+  useEffect(() => {
+    if (playingId && followPlayback)
+      rowRefs.current.get(playingId)?.scrollIntoView({ block: 'center' });
+  }, [playingId, followPlayback]);
   const [previews, setPreviews] = useState<Record<string, Preview>>({});
   const [recastMemory, setRecastMemory] = useState<RecastMemory | null>(null);
   const memoryRef = useRef<RecastMemory | null>(null);
   const ownedUrls = useRef(new Set<string>());
   const comparisonRef = useRef<HTMLElement>(null);
   const previewRef = useRef(previews);
+  const previousAudioKeys = useRef(new Map<string, string>());
   const controller = useRef<AbortController | null>(null);
   const running = useRef(false),
     importing = useRef(false);
@@ -275,6 +300,7 @@ export function VoiceScript({
       [
         ...Object.values(previewRef.current),
         ...Object.values(memoryRef.current?.beforeAudio ?? {}),
+        ...(deletedLineRef.current?.preview ? [deletedLineRef.current.preview] : []),
       ].map((preview) => preview.url),
     );
     for (const url of ownedUrls.current)
@@ -293,6 +319,7 @@ export function VoiceScript({
     stop();
     const next = { ...previewRef.current };
     for (const id of ids) {
+      if (next[id]) previousAudioKeys.current.set(id, next[id].key);
       delete next[id];
     }
     previewRef.current = next;
@@ -319,6 +346,52 @@ export function VoiceScript({
   function audio(line: ScriptLine) {
     const preview = previews[line.id];
     return preview?.key === scriptAudioKey(line) ? preview : null;
+  }
+  function generationReason(line: ScriptLine) {
+    return audio(line)
+      ? '生成済み'
+      : scriptGenerationReasons(line, previousAudioKeys.current.get(line.id)).join('・');
+  }
+  function discardDeletedLine() {
+    deletedLineRef.current = null;
+    setDeletedLine(null);
+    collectUrls();
+  }
+  function deleteLine(line: ScriptLine, index: number) {
+    if (locked) return;
+    const memory: DeletedLine = {
+      line: structuredClone(line),
+      index,
+      preview: audio(line),
+      previousKey: previousAudioKeys.current.get(line.id),
+      excluded: excludedGenerationIds.includes(line.id),
+    };
+    deletedLineRef.current = memory;
+    setDeletedLine(memory);
+    clear([line.id]);
+    previousAudioKeys.current.delete(line.id);
+    setExcludedGenerationIds((ids) => ids.filter((id) => id !== line.id));
+    setScript({ ...script, lines: script.lines.filter((row) => row.id !== line.id) });
+    setNotice(`第${index + 1}行を削除しました。直前の行削除を取り消せます。`);
+  }
+  function undoDeleteLine() {
+    const memory = deletedLineRef.current;
+    if (locked || !memory || script.lines.length >= 20) return;
+    stop();
+    const lines = [...script.lines];
+    const index = Math.min(memory.index, lines.length);
+    lines.splice(index, 0, memory.line);
+    if (memory.preview) {
+      const next = { ...previewRef.current, [memory.line.id]: memory.preview };
+      previewRef.current = next;
+      setPreviews(next);
+    }
+    if (memory.previousKey) previousAudioKeys.current.set(memory.line.id, memory.previousKey);
+    if (memory.excluded) setExcludedGenerationIds((ids) => [...ids, memory.line.id]);
+    focusRow.current = memory.line.id;
+    setScript({ ...script, lines });
+    discardDeletedLine();
+    setNotice(`削除した行を第${index + 1}行に戻しました。`);
   }
   function insertLine(index: number, source?: ScriptLine) {
     if (locked || script.lines.length >= 20) return;
@@ -793,8 +866,10 @@ export function VoiceScript({
           disabled={baseLocked}
           onPendingChange={setSwitching}
           onOpen={(value) => {
+            discardDeletedLine();
             discardRecastMemory();
             clear();
+            previousAudioKeys.current.clear();
             publishGeneration(null);
             setExcludedGenerationIds([]);
             cacheGeneration.current++;
@@ -860,6 +935,8 @@ export function VoiceScript({
               stop();
               const next = { ...previewRef.current };
               for (const row of memory.snapshot.rows) {
+                if (next[row.before.id])
+                  previousAudioKeys.current.set(row.before.id, next[row.before.id].key);
                 delete next[row.before.id];
                 const preview = memory.beforeAudio[row.before.id];
                 if (preview?.key === scriptAudioKey(row.before)) next[row.before.id] = preview;
@@ -939,9 +1016,33 @@ export function VoiceScript({
           台本：{script.lines.length}行 / 音声生成済み
           {script.lines.filter((line) => audio(line)).length}行
         </p>
+        {deletedLine && (
+          <section aria-label="直前の行削除の取り消し">
+            <p>
+              削除した第{deletedLine.index + 1}行：{deletedLine.line.text || 'セリフ未入力'}
+            </p>
+            <p>取り消せるのは直前の1行です。他の行の編集は保持します。</p>
+            {script.lines.length >= 20 && (
+              <p>20行あるため取り消せません。次の行削除では記録が置き換わります。</p>
+            )}
+            <div className="casting-actions">
+              <button
+                className="secondary-button"
+                disabled={locked || script.lines.length >= 20}
+                onClick={undoDeleteLine}
+              >
+                直前の行削除を取り消す
+              </button>
+              <button className="text-button" disabled={locked} onClick={discardDeletedLine}>
+                行削除の取り消し記録を破棄
+              </button>
+            </div>
+          </section>
+        )}
         <ScriptGenerationPlan
           lines={script.lines}
           reusable={(line) => Boolean(audio(line))}
+          reason={generationReason}
           excluded={excludedGenerationIds}
           disabled={locked}
           issue={generationIssue}
@@ -1011,7 +1112,26 @@ export function VoiceScript({
           <button className="secondary-button" disabled={playingId === null} onClick={stop}>
             台本の連続試聴を停止
           </button>
+          <button
+            className="secondary-button"
+            disabled={playingId === null}
+            onClick={() => {
+              const row = playingId ? rowRefs.current.get(playingId) : null;
+              row?.focus();
+              row?.scrollIntoView({ block: 'center' });
+            }}
+          >
+            連続試聴中の行へ移動
+          </button>
         </div>
+        <label className="script-playback-follow">
+          <input
+            type="checkbox"
+            checked={followPlayback}
+            onChange={(event) => setFollowPlayback(event.target.checked)}
+          />
+          連続試聴中の行へ自動スクロール
+        </label>
         {cloudReview && (
           <div
             className="script-generation"
@@ -1218,11 +1338,21 @@ export function VoiceScript({
               preview = audio(line);
             const chosen = line.assignment;
             return (
-              <li key={line.id} aria-label={`台本の第${index + 1}行`}>
+              <li
+                key={line.id}
+                aria-label={`台本の第${index + 1}行`}
+                tabIndex={-1}
+                aria-current={playingId === line.id ? 'true' : undefined}
+                ref={(node) => {
+                  if (node) rowRefs.current.set(line.id, node);
+                  else rowRefs.current.delete(line.id);
+                }}
+              >
                 <strong>
                   第{index + 1}行{generatingId === line.id ? ' · 生成中' : ''}
                   {playingId === line.id ? ' · 連続試聴中' : ''}
                 </strong>
+                <p>音声状態：{generationReason(line)}</p>
                 {line.character && <p>発話者：{line.character}</p>}
                 <label>
                   発話者名
@@ -1413,13 +1543,7 @@ export function VoiceScript({
                   <button
                     className="text-button"
                     disabled={locked}
-                    onClick={() => {
-                      clear([line.id]);
-                      setScript({
-                        ...script,
-                        lines: script.lines.filter((row) => row.id !== line.id),
-                      });
-                    }}
+                    onClick={() => deleteLine(line, index)}
                   >
                     第{index + 1}行を削除
                   </button>
