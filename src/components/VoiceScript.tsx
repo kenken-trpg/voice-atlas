@@ -24,12 +24,14 @@ import {
   serializeScript,
   scriptSchema,
   type ScriptLine,
+  type VoiceScript as VoiceScriptDocument,
 } from '../../shared/script';
 import {
   castingCandidateSchema,
   castingKey,
   generationSchema,
   castingRecipeFields,
+  castingRecipeSummary,
   type CastingCandidate,
   type CastingInventory,
 } from '../../shared/casting';
@@ -45,6 +47,7 @@ import { PronunciationDictionary } from './PronunciationDictionary';
 import { ScriptCasting } from './ScriptCasting';
 import { ScriptRecast } from './ScriptRecast';
 import { ScriptSceneSettings } from './ScriptSceneSettings';
+import { ScriptGenerationPlan } from './ScriptGenerationPlan';
 import { ScriptGenerationPanel } from './ScriptGenerationPanel';
 import {
   startGenerationJob,
@@ -101,7 +104,22 @@ export function VoiceScript({
   const [notice, setNotice] = useState('');
   const [opened, setOpened] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [excludedGenerationIds, setExcludedGenerationIds] = useState<string[]>([]);
   const [generationJob, setGenerationJob] = useState<ScriptGenerationJob | null>(null);
+  const [cloudReview, setCloudReview] = useState<{
+    script: VoiceScriptDocument;
+    targets: ScriptLine[];
+    forceId?: string;
+    onlyIds?: string[];
+    previousJob?: ScriptGenerationJob;
+  } | null>(null);
+  const cloudReviewRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (cloudReview) {
+      cloudReviewRef.current?.scrollIntoView({ block: 'center' });
+      cloudReviewRef.current?.focus();
+    }
+  }, [cloudReview]);
   const generationRef = useRef<ScriptGenerationJob | null>(null);
   const [stopping, setStopping] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -138,6 +156,7 @@ export function VoiceScript({
   useProjectPart('irodoriSpeakerLinks', () => speakerLinks, locked);
   useEffect(() => {
     if (!active || !opened) {
+      setCloudReview(null);
       setIrodoriUrls({});
       return;
     }
@@ -304,10 +323,12 @@ export function VoiceScript({
   function availability(line: ScriptLine) {
     const candidate = scriptCandidate(line);
     if (!candidate) return '声を選択してください';
-    if (candidate.voice.engine === 'ElevenLabs')
-      return 'ElevenLabsは製品比較画面で試聴してください（台本生成は未対応）';
     if (!castingCandidateSchema.safeParse(candidate).success) return '現行カタログ対象外';
     if (checking) return '確認中';
+    if (candidate.voice.engine === 'ElevenLabs')
+      return inventory?.engines.some((engine) => engine.engine === 'ElevenLabs' && engine.ready)
+        ? '試聴可能'
+        : 'ElevenLabs未接続（サーバーのAPIキー・接続状態を確認してください）';
     if (inventory?.voices.some((voice) => castingKey(voice) === castingKey(candidate.voice)))
       return '試聴可能';
     return inventory?.engines.find((engine) => engine.engine === candidate.voice.engine)?.ready
@@ -321,6 +342,7 @@ export function VoiceScript({
     return status === '試聴可能' ? null : status;
   }
   function publishGeneration(job: ScriptGenerationJob | null) {
+    setCloudReview(null);
     generationRef.current = job;
     setGenerationJob(job);
   }
@@ -466,7 +488,12 @@ export function VoiceScript({
         );
     });
   }
-  async function generate(forceId?: string, onlyIds?: string[], previousJob?: ScriptGenerationJob) {
+  async function generate(
+    forceId?: string,
+    onlyIds?: string[],
+    previousJob?: ScriptGenerationJob,
+    cloudConfirmed = false,
+  ) {
     if (
       locked ||
       !cacheReady ||
@@ -485,6 +512,14 @@ export function VoiceScript({
         : (!onlyIds || onlyIds.includes(line.id)) && (previousJob || !audio(line)),
     );
     if (!targets.length || targets.some((line) => generationIssue(line))) return;
+    if (
+      !cloudConfirmed &&
+      targets.some((line) => scriptCandidate(line)?.voice.engine === 'ElevenLabs')
+    ) {
+      setCloudReview({ script, targets, forceId, onlyIds, previousJob });
+      return;
+    }
+    setCloudReview(null);
     let job: ScriptGenerationJob;
     try {
       job = startGenerationJob(script, targets, previousJob);
@@ -629,6 +664,7 @@ export function VoiceScript({
   }
   const allReady = script.lines.length > 0 && script.lines.every((line) => audio(line));
   const missing = script.lines.filter((line) => !audio(line));
+  const selectedMissing = missing.filter((line) => !excludedGenerationIds.includes(line.id));
   const recastMissing = missing.filter((line) => recastIds.includes(line.id));
   return (
     <details
@@ -649,7 +685,7 @@ export function VoiceScript({
         </p>
         {error && <p role="alert">{error}</p>}
         {notice && <p role="status">{notice}</p>}
-        <details>
+        <details id="production-audio-storage">
           <summary>台本音声の保存と再利用</summary>
           <section aria-label="台本音声の保存と再利用">
             <p>
@@ -736,6 +772,7 @@ export function VoiceScript({
             discardRecastMemory();
             clear();
             publishGeneration(null);
+            setExcludedGenerationIds([]);
             cacheGeneration.current++;
             cacheRunning.current = false;
             setCacheReady(false);
@@ -881,6 +918,20 @@ export function VoiceScript({
           台本：{script.lines.length}行 / 音声生成済み
           {script.lines.filter((line) => audio(line)).length}行
         </p>
+        <ScriptGenerationPlan
+          lines={script.lines}
+          reusable={(line) => Boolean(audio(line))}
+          excluded={excludedGenerationIds}
+          disabled={locked}
+          issue={generationIssue}
+          currentModel={currentModel}
+          onToggle={(id) => {
+            setCloudReview(null);
+            setExcludedGenerationIds((ids) =>
+              ids.includes(id) ? ids.filter((value) => value !== id) : [...ids, id],
+            );
+          }}
+        />
         <div className="casting-actions">
           <button
             className="secondary-button"
@@ -888,15 +939,20 @@ export function VoiceScript({
               locked ||
               !cacheReady ||
               checking ||
-              !missing.length ||
-              missing.some(
+              !selectedMissing.length ||
+              selectedMissing.some(
                 (line) =>
                   !line.text.trim() ||
                   !scriptSpokenText(line).trim() ||
                   availability(line) !== '試聴可能',
               )
             }
-            onClick={() => void generate()}
+            onClick={() =>
+              void generate(
+                undefined,
+                selectedMissing.map((line) => line.id),
+              )
+            }
           >
             未生成の行を台本順に生成
           </button>
@@ -935,6 +991,79 @@ export function VoiceScript({
             台本の連続試聴を停止
           </button>
         </div>
+        {cloudReview && (
+          <div
+            className="script-generation"
+            role="group"
+            aria-label="ElevenLabsへの台本送信確認"
+            ref={cloudReviewRef}
+            tabIndex={-1}
+          >
+            <h5>ElevenLabsへ送る台本の行を確認</h5>
+            <p>
+              今回の生成は{cloudReview.targets.length}行です。以下のElevenLabs対象行の読み上げ文を
+              外部APIへ送信し、アカウントの利用枠を消費します。文字数は料金の見積もりではありません。
+              他の製品の行は、それぞれの接続先で生成します。
+            </p>
+            <ol>
+              {cloudReview.targets.flatMap((line) => {
+                const candidate = scriptCandidate(line);
+                if (
+                  candidate?.recipe.engine !== 'ElevenLabs' ||
+                  candidate.voice.engine !== 'ElevenLabs'
+                )
+                  return [];
+                return [
+                  <li key={line.id}>
+                    <strong>
+                      第{cloudReview.script.lines.findIndex((item) => item.id === line.id) + 1}行 ：
+                      {line.character ?? line.assignment?.character} · {candidate.voice.name}
+                    </strong>
+                    <p>
+                      声ID：{candidate.voice.voiceId} / モデル：{candidate.recipe.modelId}
+                    </p>
+                    <p>{castingRecipeSummary(candidate)}</p>
+                    <p>
+                      読み上げ文（{Array.from(scriptSpokenText(line)).length}文字）：
+                      {scriptSpokenText(line)}
+                    </p>
+                  </li>,
+                ];
+              })}
+            </ol>
+            {cloudReview.script !== script && (
+              <p role="status">台本が変更されました。生成操作から対象を確認し直してください。</p>
+            )}
+            <button
+              className="secondary-button"
+              disabled={
+                locked ||
+                checking ||
+                !cacheReady ||
+                cloudReview.script !== script ||
+                cloudReview.targets.some((line) => generationIssue(line))
+              }
+              onClick={() => {
+                if (cloudReview.script !== scriptRef.current) return;
+                void generate(
+                  cloudReview.forceId,
+                  cloudReview.onlyIds,
+                  cloudReview.previousJob,
+                  true,
+                );
+              }}
+            >
+              確認した行をElevenLabsへ送信して生成
+            </button>
+            <button className="secondary-button" onClick={() => setCloudReview(null)}>
+              台本の送信をキャンセル
+            </button>
+            <p>
+              自動再試行はしません。中止しても送信済みの要求は利用枠を消費する場合があります。
+              失敗した行を再試行するときは、再び送信対象を確認します。
+            </p>
+          </div>
+        )}
         <ScriptGenerationPanel
           job={generationJob}
           script={script}

@@ -334,7 +334,11 @@ test('rejects invalid imports and quota failures atomically and enforces row lim
   voice.voiceId = 'removed-voice';
   await panel.getByLabel('台本JSONファイル').setInputFiles(file(unavailable));
   await panel.getByRole('button', { name: '台本を保存せず切り替える', exact: true }).click();
-  await expect(panel.getByText(/現行カタログ対象外/)).toBeVisible();
+  await expect(
+    panel
+      .getByRole('listitem', { name: '台本の第2行', exact: true })
+      .getByText(/現行カタログ対象外/),
+  ).toBeVisible();
   await expect(panel.getByRole('button', { name: '第2行を生成', exact: true })).toBeDisabled();
   expect(calls).toBe(2);
 });

@@ -193,6 +193,7 @@ test('keeps records on canceled switching and clears them on a real script repla
   );
   await panel.getByRole('button', { name: '未生成の行を台本順に生成', exact: true }).click();
   await expect(progress).toContainText('失敗理由：生成失敗');
+  await panel.getByLabel('第2行を生成対象に含める', { exact: true }).uncheck();
   await panel.getByLabel('台本名', { exact: true }).fill('編集中');
   const file = {
     name: 'next-script.json',
@@ -205,6 +206,7 @@ test('keeps records on canceled switching and clears them on a real script repla
   await panel.getByLabel('台本JSONファイル', { exact: true }).setInputFiles(file);
   await panel.getByRole('button', { name: '台本を保存せず切り替える', exact: true }).click();
   await expect(panel.getByLabel('台本名', { exact: true })).toHaveValue('次の台本');
+  await expect(panel.getByLabel('第2行を生成対象に含める', { exact: true })).toBeChecked();
   await expect(progress).toHaveCount(0);
   expect(calls).toHaveLength(2);
   await panel.getByRole('button', { name: '第1行を生成', exact: true }).click();
@@ -213,4 +215,54 @@ test('keeps records on canceled switching and clears them on a real script repla
   await expand(page);
   await expect(progress).toHaveCount(0);
   expect(calls).toHaveLength(3);
+});
+
+test('previews spoken text and sends only selected missing or changed lines while retaining reusable audio', async ({
+  page,
+}, testInfo) => {
+  const { panel, calls } = await setup(page, (route) => wav(route));
+  const plan = panel.getByRole('region', { name: '生成前の対象確認', exact: true });
+  await expect(plan).toContainText('生成対象3行');
+  await expect(plan.getByRole('listitem', { name: '生成予定 第1行', exact: true })).toContainText(
+    'ほしよみのとう',
+  );
+  await expect(plan).toContainText('VOICEVOX');
+  await plan.screenshot({ path: testInfo.outputPath('generation-plan.png') });
+  expect(calls).toHaveLength(0);
+  await plan.getByLabel('第2行を生成対象に含める', { exact: true }).uncheck();
+  await expect(plan).toContainText('生成対象2行');
+  await panel.getByRole('button', { name: '未生成の行を台本順に生成', exact: true }).click();
+  await expect(panel.locator(':scope > ol audio')).toHaveCount(2);
+  expect(calls).toEqual(['ほしよみのとう', '続けます。']);
+  await expect(plan).toContainText('音声を再利用2行');
+  const firstUrl = await panel.getByLabel('台本の第1行の試聴', { exact: true }).getAttribute('src');
+  await panel.getByLabel('第3行のセリフ', { exact: true }).fill('変更した台詞です。');
+  await expect(plan).toContainText('生成対象1行');
+  await expect(plan).toContainText('読み上げ文9文字');
+  await panel.getByRole('button', { name: '未生成の行を台本順に生成', exact: true }).click();
+  await expect(panel.locator(':scope > ol audio')).toHaveCount(2);
+  expect(calls).toEqual(['ほしよみのとう', '続けます。', '変更した台詞です。']);
+  await expect(panel.getByLabel('台本の第1行の試聴', { exact: true })).toHaveAttribute(
+    'src',
+    firstUrl!,
+  );
+  await plan.getByLabel('第2行を生成対象に含める', { exact: true }).check();
+  await expect(plan).toContainText('生成対象1行');
+  await panel.getByRole('button', { name: '未生成の行を台本順に生成', exact: true }).click();
+  await expect(panel.locator(':scope > ol audio')).toHaveCount(3);
+  expect(calls.at(-1)).toBe('案内を頼もう。');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('allows ready rows to generate after excluding a row with missing text', async ({ page }) => {
+  const { panel, calls } = await setup(page, (route) => wav(route));
+  await panel.getByLabel('第2行のセリフ', { exact: true }).fill('');
+  const generate = panel.getByRole('button', { name: '未生成の行を台本順に生成', exact: true });
+  await expect(generate).toBeDisabled();
+  const plan = panel.getByRole('region', { name: '生成前の対象確認', exact: true });
+  await expect(plan).toContainText('セリフを入力してください');
+  await plan.getByLabel('第2行を生成対象に含める', { exact: true }).uncheck();
+  await generate.click();
+  await expect(panel.locator(':scope > ol audio')).toHaveCount(2);
+  expect(calls).toEqual(['ほしよみのとう', '続けます。']);
 });
