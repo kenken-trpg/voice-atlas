@@ -45,6 +45,7 @@ import { PronunciationDictionary } from './PronunciationDictionary';
 import { ScriptCasting } from './ScriptCasting';
 import { ScriptRecast } from './ScriptRecast';
 import { ScriptSceneSettings } from './ScriptSceneSettings';
+import { ScriptGenerationPlan } from './ScriptGenerationPlan';
 import { ScriptGenerationPanel } from './ScriptGenerationPanel';
 import {
   startGenerationJob,
@@ -101,6 +102,7 @@ export function VoiceScript({
   const [notice, setNotice] = useState('');
   const [opened, setOpened] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [excludedGenerationIds, setExcludedGenerationIds] = useState<string[]>([]);
   const [generationJob, setGenerationJob] = useState<ScriptGenerationJob | null>(null);
   const generationRef = useRef<ScriptGenerationJob | null>(null);
   const [stopping, setStopping] = useState(false);
@@ -629,6 +631,7 @@ export function VoiceScript({
   }
   const allReady = script.lines.length > 0 && script.lines.every((line) => audio(line));
   const missing = script.lines.filter((line) => !audio(line));
+  const selectedMissing = missing.filter((line) => !excludedGenerationIds.includes(line.id));
   const recastMissing = missing.filter((line) => recastIds.includes(line.id));
   return (
     <details
@@ -736,6 +739,7 @@ export function VoiceScript({
             discardRecastMemory();
             clear();
             publishGeneration(null);
+            setExcludedGenerationIds([]);
             cacheGeneration.current++;
             cacheRunning.current = false;
             setCacheReady(false);
@@ -881,6 +885,19 @@ export function VoiceScript({
           台本：{script.lines.length}行 / 音声生成済み
           {script.lines.filter((line) => audio(line)).length}行
         </p>
+        <ScriptGenerationPlan
+          lines={script.lines}
+          reusable={(line) => Boolean(audio(line))}
+          excluded={excludedGenerationIds}
+          disabled={locked}
+          issue={generationIssue}
+          currentModel={currentModel}
+          onToggle={(id) =>
+            setExcludedGenerationIds((ids) =>
+              ids.includes(id) ? ids.filter((value) => value !== id) : [...ids, id],
+            )
+          }
+        />
         <div className="casting-actions">
           <button
             className="secondary-button"
@@ -888,15 +905,20 @@ export function VoiceScript({
               locked ||
               !cacheReady ||
               checking ||
-              !missing.length ||
-              missing.some(
+              !selectedMissing.length ||
+              selectedMissing.some(
                 (line) =>
                   !line.text.trim() ||
                   !scriptSpokenText(line).trim() ||
                   availability(line) !== '試聴可能',
               )
             }
-            onClick={() => void generate()}
+            onClick={() =>
+              void generate(
+                undefined,
+                selectedMissing.map((line) => line.id),
+              )
+            }
           >
             未生成の行を台本順に生成
           </button>

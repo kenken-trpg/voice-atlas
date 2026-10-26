@@ -58,6 +58,16 @@
   padding: 10px 0;
   border-bottom: 1px solid var(--line);
 }
+.voice-script .script-generation li label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+}
+.voice-script .script-generation li input[type='checkbox'] {
+  flex: none;
+  margin: 0;
+}
 .script-generation li p {
   margin: 4px 0;
 }
