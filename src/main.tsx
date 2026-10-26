@@ -54,6 +54,7 @@ import { AvailabilityBadge, AvailabilityHelp } from './components/AvailabilityBa
 import { CharacterContext } from './components/CharacterContext';
 import { jsonRequest, download } from './lib/http';
 import { ProjectProvider, useProject, useProjectPart } from './lib/project-context';
+import { ListeningComparison } from './components/ListeningComparison';
 import { ProjectPanel, type ProductionStep } from './components/ProjectPanel';
 import { ConnectionGuide } from './components/ConnectionGuide';
 import { IrodoriCandidates } from './components/IrodoriCandidates';
@@ -691,6 +692,7 @@ function App() {
           onBusyChange={setGuideBusy}
         />
         <IrodoriCandidates />
+        <ListeningComparison />
         <div className="recipe-import">
           <button
             className="secondary-button"

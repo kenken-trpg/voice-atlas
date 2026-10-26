@@ -1,3 +1,4 @@
+import { listeningRunSchema } from '../shared/listening-review';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -52,6 +53,7 @@ describe('repeatable listening runs (synthetic audio only)', () => {
       { candidate, output: directory, machineNote: 'モック検証' },
       synthesize,
     );
+    expect(listeningRunSchema.safeParse(manifest).success).toBe(true);
     expect(manifest.status).toBe('completed');
     expect(manifest.listening.status).toBe('not-reviewed');
     expect(manifest.samples.map((item) => item.id)).toEqual(
