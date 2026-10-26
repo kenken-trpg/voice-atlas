@@ -18,7 +18,9 @@ fixture.documents.script = {
 const wav = (route: Route) =>
   route.fulfill({ contentType: 'audio/wav', body: Buffer.from(pcmWav(Array(2400).fill(100))) });
 async function expand(page: Page) {
-  await page.getByRole('button', { name: 'VOICEVOX・AivisSpeechを比較する', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'VOICEVOX・AivisSpeech・ElevenLabsを比較する', exact: true })
+    .click();
   await page.getByText('キャラクターの採用声ライブラリ', { exact: true }).click();
   await page.getByText('台本を作成・試聴する', { exact: true }).click();
   return page.getByRole('region', { name: '台本の試聴', exact: true });

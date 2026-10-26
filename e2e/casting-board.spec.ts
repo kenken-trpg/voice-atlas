@@ -35,7 +35,9 @@ async function open(page: Page) {
     route.fulfill({ json: { ready: false, checkedAt: record.recordedAt, models: [] } }),
   );
   await page.goto('/');
-  await page.getByRole('button', { name: 'VOICEVOX・AivisSpeechを比較する', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'VOICEVOX・AivisSpeech・ElevenLabsを比較する', exact: true })
+    .click();
   await page.getByText('キャラクターの採用声ライブラリ', { exact: true }).click();
   return page.getByRole('region', { name: 'キャスティング表', exact: true });
 }
@@ -81,7 +83,9 @@ test('assigns, confirms replacement, restores after reload and loads native sett
   await board.getByRole('button', { name: 'この場面の確定設定を置き換える' }).click();
   await expect(board.getByText('キャスティング：1件 / 登録1件')).toBeVisible();
   await page.reload();
-  await page.getByRole('button', { name: 'VOICEVOX・AivisSpeechを比較する', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'VOICEVOX・AivisSpeech・ElevenLabsを比較する', exact: true })
+    .click();
   await page.getByText('キャラクターの採用声ライブラリ', { exact: true }).click();
   board = page.getByRole('region', { name: 'キャスティング表', exact: true });
   await expect(board.getByText('物語 / 案内人 / 導入', { exact: true })).toBeVisible();
@@ -138,7 +142,9 @@ test('imports atomically, rejects conflicting data and storage failure, exports 
   await expect(board.getByRole('alert')).toContainText('保持');
   await expect(board.getByText('キャスティング：1件 / 登録1件')).toBeVisible();
   await page.reload();
-  await page.getByRole('button', { name: 'VOICEVOX・AivisSpeechを比較する', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'VOICEVOX・AivisSpeech・ElevenLabsを比較する', exact: true })
+    .click();
   await page.getByText('キャラクターの採用声ライブラリ', { exact: true }).click();
   await board.getByRole('button', { name: '確定設定を削除', exact: true }).click();
   await board.getByRole('button', { name: 'この確定設定を削除する' }).click();

@@ -116,7 +116,9 @@ test('reviews and cancels switching, restores casting and scripts, and keeps leg
   await inspect(page, fixture);
   await panel.getByRole('button', { name: '確認した作品を復元', exact: true }).click();
   expect(await page.evaluate((key) => localStorage.getItem(key), scriptStorageKey)).toBe(original);
-  await page.getByRole('button', { name: 'VOICEVOX・AivisSpeechを比較する', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'VOICEVOX・AivisSpeech・ElevenLabsを比較する', exact: true })
+    .click();
   await expect(page.locator('#casting-A-tempoDynamicsScale')).toHaveValue('0.72');
   await expect(page.locator('#casting-reason')).toHaveValue('まだ記録していない比較理由');
   await page.locator('#casting-A-tempoDynamicsScale').fill('0.43');

@@ -12,6 +12,7 @@ export interface Config {
   geminiModel: string;
   deepseekKey: string;
   deepseekModel: string;
+  elevenLabsApiKey?: string;
   voicevoxUrl: string;
   aivisUrl?: string;
 }
@@ -48,6 +49,7 @@ export function loadConfig(): Config {
     geminiModel: process.env.GEMINI_MODEL || defaultGeminiModel,
     deepseekKey: (process.env.DEEPSEEK_API_KEY || '').trim(),
     deepseekModel: process.env.DEEPSEEK_MODEL || defaultDeepseekModel,
+    elevenLabsApiKey: (process.env.ELEVENLABS_API_KEY || '').trim(),
     aivisUrl: loopbackUrl(process.env.AIVIS_BASE_URL || 'http://127.0.0.1:10101'),
     voicevoxUrl: loopbackUrl(process.env.VOICEVOX_BASE_URL || 'http://127.0.0.1:50021'),
   };

@@ -54,7 +54,8 @@ import { AvailabilityBadge, AvailabilityHelp } from './components/AvailabilityBa
 import { CharacterContext } from './components/CharacterContext';
 import { jsonRequest, download } from './lib/http';
 import { ProjectProvider, useProject, useProjectPart } from './lib/project-context';
-import { ProjectPanel } from './components/ProjectPanel';
+import { ListeningComparison } from './components/ListeningComparison';
+import { ProjectPanel, type ProductionStep } from './components/ProjectPanel';
 import { ConnectionGuide } from './components/ConnectionGuide';
 import { IrodoriCandidates } from './components/IrodoriCandidates';
 import './styles.css';
@@ -606,6 +607,29 @@ function App() {
     (mode === 'ollama' && inputMode === 'text'
       ? Boolean(caps?.ollama.textReady ?? caps?.ollama.ready)
       : Boolean(caps?.[mode]?.ready));
+  function navigateProduction(step: ProductionStep) {
+    if (step !== 'discovery') setCastingOpen(true);
+    requestAnimationFrame(() => {
+      const target = document.getElementById(
+        step === 'discovery'
+          ? 'workspace'
+          : step === 'casting'
+            ? 'production-casting'
+            : 'production-script',
+      );
+      if (!target) return;
+      let parent = target.parentElement;
+      while (parent) {
+        if (parent instanceof HTMLDetailsElement) parent.open = true;
+        parent = parent.parentElement;
+      }
+      if (target instanceof HTMLDetailsElement) target.open = true;
+      target.scrollIntoView({ block: 'start' });
+      const focusTarget =
+        target instanceof HTMLDetailsElement ? target.querySelector('summary') : target;
+      focusTarget?.focus({ preventScroll: true });
+    });
+  }
   return (
     <>
       <header className="site-header">
@@ -662,12 +686,13 @@ function App() {
             </div>
           </div>
         </section>
+        <ProjectPanel onNavigate={navigateProduction} />
         <ConnectionGuide
           disabled={Boolean(busy) || loadingImage || loadingRecipe}
           onBusyChange={setGuideBusy}
         />
-        <ProjectPanel />
         <IrodoriCandidates />
+        <ListeningComparison />
         <div className="recipe-import">
           <button
             className="secondary-button"
@@ -701,7 +726,7 @@ function App() {
             aria-controls="casting-workspace"
             onClick={() => setCastingOpen(!castingOpen)}
           >
-            {castingOpen ? '製品横断の比較を閉じる' : 'VOICEVOX・AivisSpeechを比較する'}
+            {castingOpen ? '製品横断の比較を閉じる' : 'VOICEVOX・AivisSpeech・ElevenLabsを比較する'}
           </button>
         </div>
         <div id="casting-workspace">
@@ -834,7 +859,7 @@ function App() {
               </div>
               <div>
                 <strong>AivisSpeech</strong>
-                <p>「VOICEVOX・AivisSpeechを比較する」から接続を確認</p>
+                <p>「VOICEVOX・AivisSpeech・ElevenLabsを比較する」から接続を確認</p>
                 <code>127.0.0.1:10101</code>
                 <small>
                   AivisSpeechを起動してください。接続先は.envのAIVIS_BASE_URLで変更できます。設定後はサーバーを再起動してください。
@@ -869,7 +894,7 @@ function App() {
             </button>
           </div>
         )}
-        <div className="workspace" id="workspace">
+        <div className="workspace" id="workspace" tabIndex={-1}>
           <aside className="input-column">
             <section className="panel image-panel">
               <div className="section-heading">

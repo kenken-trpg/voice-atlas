@@ -42,7 +42,9 @@ async function open(page: Page) {
     return route.fulfill({ contentType: 'audio/wav', body: wav() });
   });
   await page.goto('/');
-  await page.getByRole('button', { name: 'VOICEVOX・AivisSpeechを比較する', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'VOICEVOX・AivisSpeech・ElevenLabsを比較する', exact: true })
+    .click();
   const workspace = page.getByRole('region', { name: '製品横断の比較', exact: true });
   await expect(workspace.locator('#casting-A')).toBeVisible();
   return workspace;
@@ -231,6 +233,8 @@ test('distinguishes absent and omitted terms and rejects unsafe metadata in impo
     mimeType: 'application/json',
     buffer: Buffer.from(JSON.stringify(saved)),
   });
-  await expect(workspace.getByRole('alert')).toContainText('現在の作業は保持');
+  await expect(
+    workspace.getByRole('alert').filter({ hasText: '比較セッションJSONの形式' }),
+  ).toContainText('現在の作業は保持');
   await expect(page.locator('#casting-A-tempoDynamicsScale')).toHaveValue('0.64');
 });

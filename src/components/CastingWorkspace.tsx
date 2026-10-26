@@ -2,9 +2,17 @@ import { useEffect, useRef, useState } from 'react';
 import { useProject, useProjectPart } from '../lib/project-context';
 import { aivisRecipeSchema } from '../../shared/aivis';
 import {
+  elevenLabsRecipeSchema,
+  elevenLabsModelsResponseSchema,
+  elevenLabsVoicePageSchema,
+  type ElevenLabsModelsResponse,
+  type ElevenLabsVoicePage,
+} from '../../shared/elevenlabs';
+import {
   castingKey,
   maxCastingSessionFileBytes,
   castingRecipeFields as controls,
+  castingRecipeSummary,
   castingInventorySchema,
   castingSessionSchema,
   castingEvaluationSchema,
@@ -33,6 +41,9 @@ import {
 import { AivisModelDetails } from './AivisModelDetails';
 import { VoiceLibrary, type VoiceLibraryHandle } from './VoiceLibrary';
 import { VoiceVariationEditor } from './VoiceVariationEditor';
+import { ElevenLabsModelDetails } from './ElevenLabsModelDetails';
+import { ElevenLabsVoiceResults } from './ElevenLabsVoiceResults';
+import { ElevenLabsCandidateManager } from './ElevenLabsCandidateManager';
 import {
   loadLibraryCandidate,
   libraryCandidate,
@@ -51,7 +62,16 @@ const outcomeLabels = {
   tie: '同程度',
   undecided: '判断できない',
 } as const;
-function initialCandidate(voice: CastingVoice, profile: Profile): CastingCandidate {
+function initialCandidate(
+  voice: CastingVoice,
+  profile: Profile,
+  modelId?: string,
+): CastingCandidate {
+  if (voice.engine === 'ElevenLabs')
+    return {
+      voice,
+      recipe: elevenLabsRecipeSchema.parse({ engine: 'ElevenLabs', modelId }),
+    };
   return {
     voice,
     recipe:
@@ -87,6 +107,19 @@ export function CastingWorkspace({
   const [checking, setChecking] = useState(false);
   const [modelInfo, setModelInfo] = useState<AivisModelInfoResponse | null>(null);
   const [checkingModels, setCheckingModels] = useState(false);
+  const [elevenModels, setElevenModels] = useState<ElevenLabsModelsResponse | null>(null);
+  const [elevenVoices, setElevenVoices] = useState<ElevenLabsVoicePage['voices']>([]);
+  const [checkingElevenModels, setCheckingElevenModels] = useState(false);
+  const [elevenModelId, setElevenModelId] = useState('');
+  const [elevenResultsSearch, setElevenResultsSearch] = useState('');
+  const [elevenSearched, setElevenSearched] = useState(false);
+  const elevenModelRequestId = useRef(0);
+  const elevenVoiceRequestId = useRef(0);
+  const [elevenSearch, setElevenSearch] = useState('');
+  const [elevenNextCursor, setElevenNextCursor] = useState<string | null>(null);
+  const [elevenHasMore, setElevenHasMore] = useState(false);
+  const [elevenVoiceLoading, setElevenVoiceLoading] = useState(false);
+  const [elevenError, setElevenError] = useState('');
   const modelRequestId = useRef(0);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [libraryDraft, setLibraryDraft] = useState<CastingEvaluation | null>(null);
@@ -140,6 +173,8 @@ export function CastingWorkspace({
       requestRef.current?.abort();
       refreshId.current++;
       modelRequestId.current++;
+      elevenModelRequestId.current++;
+      elevenVoiceRequestId.current++;
       Object.values(audioRef.current).forEach((entry) => URL.revokeObjectURL(entry.url));
       Object.values(originalAudioRef.current).forEach((entry) => URL.revokeObjectURL(entry.url));
     },
@@ -162,6 +197,20 @@ export function CastingWorkspace({
       const result = castingInventorySchema.parse(await jsonRequest('/api/casting/voices'));
       if (id !== refreshId.current) return;
       setInventory(result);
+      if (result.engines.some((item) => item.engine === 'ElevenLabs' && item.ready)) {
+        await refreshElevenModels();
+        if (id !== refreshId.current) return;
+        void loadElevenVoices(null, elevenSearch);
+      } else {
+        elevenModelRequestId.current++;
+        elevenVoiceRequestId.current++;
+        setElevenModels(null);
+        setElevenVoices([]);
+        setElevenNextCursor(null);
+        setElevenHasMore(false);
+        setCheckingElevenModels(false);
+        setElevenVoiceLoading(false);
+      }
       const ordered = [...result.voices].sort(
         (a, b) => (a.engine === 'AivisSpeech' ? 0 : 1) - (b.engine === 'AivisSpeech' ? 0 : 1),
       );
@@ -202,6 +251,66 @@ export function CastingWorkspace({
       if (id === modelRequestId.current) setCheckingModels(false);
     }
   }
+  async function refreshElevenModels() {
+    const id = ++elevenModelRequestId.current;
+    setCheckingElevenModels(true);
+    try {
+      const result = elevenLabsModelsResponseSchema.parse(
+        await jsonRequest('/api/casting/elevenlabs/models'),
+      );
+      if (id !== elevenModelRequestId.current) return;
+      setElevenModels(result);
+      setElevenModelId((previous) =>
+        result.models.some((model) => model.modelId === previous) ? previous : '',
+      );
+    } catch {
+      if (id === elevenModelRequestId.current) {
+        setElevenModels({
+          ready: false,
+          detail:
+            'ElevenLabsのモデル一覧を取得できませんでした。接続を確認して再取得してください。',
+          checkedAt: new Date().toISOString(),
+          models: [],
+        });
+        setElevenModelId('');
+      }
+    } finally {
+      if (id === elevenModelRequestId.current) setCheckingElevenModels(false);
+    }
+  }
+  async function loadElevenVoices(cursor: string | null = null, search = elevenSearch) {
+    const id = ++elevenVoiceRequestId.current;
+    setElevenVoiceLoading(true);
+    setElevenError('');
+    try {
+      const query = new URLSearchParams({ search, ...(cursor ? { cursor } : {}) });
+      const page = elevenLabsVoicePageSchema.parse(
+        await jsonRequest(`/api/casting/elevenlabs/voices?${query}`),
+      );
+      if (id !== elevenVoiceRequestId.current) return;
+      setElevenVoices((previous) =>
+        [
+          ...new Map(
+            [...(cursor ? previous : []), ...page.voices].map((voice) => [
+              castingKey(voice),
+              voice,
+            ]),
+          ).values(),
+        ].slice(0, 200),
+      );
+      setElevenResultsSearch(search.trim());
+      setElevenSearched(true);
+      setElevenNextCursor(page.nextCursor);
+      setElevenHasMore(page.hasMore);
+    } catch (e) {
+      if (id === elevenVoiceRequestId.current)
+        setElevenError(
+          e instanceof Error ? e.message : 'ElevenLabsの声一覧を取得できませんでした。',
+        );
+    } finally {
+      if (id === elevenVoiceRequestId.current) setElevenVoiceLoading(false);
+    }
+  }
   function currentModel(candidate: CastingCandidate) {
     if (checkingModels || candidate.voice.engine !== 'AivisSpeech') return undefined;
     const key = modelInfoKey({
@@ -219,7 +328,38 @@ export function CastingWorkspace({
       ...(info ? { modelInfo: info } : {}),
     };
   }
-  const available = new Set(inventory?.voices.map(castingKey) ?? []);
+  const orderedElevenModels = [...(elevenModels?.models ?? [])].sort(
+    (a, b) =>
+      Number(b.languages.some((language) => language.id === 'ja')) -
+      Number(a.languages.some((language) => language.id === 'ja')),
+  );
+  function canGenerate(candidate: CastingCandidate) {
+    if (candidate.voice.engine !== 'ElevenLabs')
+      return (
+        inventory?.voices.some((voice) => castingKey(voice) === castingKey(candidate.voice)) ===
+        true
+      );
+    if (
+      candidate.recipe.engine !== 'ElevenLabs' ||
+      checkingElevenModels ||
+      !elevenModels?.ready ||
+      !inventory?.engines.some((engine) => engine.engine === 'ElevenLabs' && engine.ready)
+    )
+      return false;
+    const recipe = candidate.recipe;
+    const model = elevenModels.models.find((item) => item.modelId === recipe.modelId);
+    return (
+      !!model &&
+      text.trim().length <= model.maxCharacters &&
+      (model.canUseStyle || recipe.style === 0) &&
+      (model.canUseSpeakerBoost || !recipe.useSpeakerBoost)
+    );
+  }
+  const available = new Set(
+    Object.entries(candidates)
+      .filter(([, candidate]) => canGenerate(candidate))
+      .map(([key]) => key),
+  );
   function audioKey(candidate: CastingCandidate) {
     return JSON.stringify([text, candidate.voice, candidate.recipe]);
   }
@@ -263,6 +403,8 @@ export function CastingWorkspace({
         if (controller.signal.aborted) break;
         const candidate = original ? libraryCandidate(origins[key]) : candidates[key],
           cacheKey = original ? originalAudioKey(key) : audioKey(candidate);
+        if (!canGenerate(candidate))
+          throw new Error('声・モデル・文字数の利用条件を確認してください。');
         const cache = original ? originalAudioRef.current : audioRef.current;
         if (key !== forceKey && cache[key]?.key === cacheKey) continue;
         const response = await fetch('/api/casting/preview', {
@@ -422,7 +564,7 @@ export function CastingWorkspace({
   useProjectPart(
     'casting',
     () => ({ session: sessionSnapshot(sessionTimestamp.current), outcome, reason }),
-    locked || checking || checkingModels,
+    locked || checking || checkingModels || checkingElevenModels,
   );
   function loadVoice(entry: VoiceLibraryEntry, slot: 0 | 1) {
     if (locked || generating.current) throw new Error('処理が完了してから読み込んでください。');
@@ -442,6 +584,83 @@ export function CastingWorkspace({
     setError('');
     setNotice('採用声を読み込みました。音声は再生成してください。');
   }
+  function addElevenVoice(voice: ElevenLabsVoicePage['voices'][number]) {
+    const key = castingKey(voice);
+    if (
+      locked ||
+      checking ||
+      generating.current ||
+      candidates[key] ||
+      Object.keys(candidates).length >= 200 ||
+      checkingElevenModels ||
+      !elevenModels?.ready ||
+      !elevenModels.models.some((model) => model.modelId === elevenModelId)
+    )
+      return;
+    const candidate = initialCandidate(voice, profile, elevenModelId);
+    setCandidates((previous) => ({ ...previous, [key]: candidate }));
+    setPair(
+      (previous) =>
+        previous ?? (Object.keys(candidates).length ? [Object.keys(candidates)[0], key] : null),
+    );
+    setSelected(key);
+    setNotice(`${voice.name}を比較候補に追加しました。`);
+  }
+  function assignCandidate(key: string, slot: 0 | 1) {
+    if (locked || checking || generating.current || !candidates[key]) return;
+    const other = pair?.[1 - slot] ?? Object.keys(candidates).find((item) => item !== key);
+    if (pair && pair[1 - slot] === key) setPair([pair[1], pair[0]]);
+    else setPair(other ? (slot === 0 ? [key, other] : [other, key]) : null);
+    setSelected(key);
+    setSingleSlot(slot);
+    setReason('');
+    setOutcome('undecided');
+    setNotice(`${candidates[key].voice.name}を候補${slot === 0 ? 'A' : 'B'}にしました。`);
+  }
+  function removeCandidate(key: string) {
+    if (locked || checking || generating.current || candidates[key]?.voice.engine !== 'ElevenLabs')
+      return;
+    const next = { ...candidates };
+    delete next[key];
+    const remaining = Object.keys(next);
+    let nextPair = pair;
+    if (pair?.includes(key)) {
+      const survivor = pair.find((item) => item !== key)!;
+      const replacement = remaining.find((item) => item !== survivor);
+      nextPair = replacement
+        ? pair[0] === key
+          ? [replacement, survivor]
+          : [survivor, replacement]
+        : null;
+      setSingleSlot(pair[0] === key ? 1 : 0);
+    }
+    setCandidates(next);
+    setPair(nextPair);
+    setSelected((previous) =>
+      previous && previous !== key ? previous : (nextPair?.[0] ?? remaining[0] ?? null),
+    );
+    const forgetAudio = (ref: typeof audioRef, update: typeof setAudio) => {
+      if (ref.current[key]) URL.revokeObjectURL(ref.current[key].url);
+      const retained = { ...ref.current };
+      delete retained[key];
+      ref.current = retained;
+      update(retained);
+    };
+    forgetAudio(audioRef, setAudio);
+    forgetAudio(originalAudioRef, setOriginalAudio);
+    setOrigins((previous) => {
+      const retained = { ...previous };
+      delete retained[key];
+      return retained;
+    });
+    if (pair?.includes(key) || (!pair && selected === key)) {
+      setReason('');
+      setOutcome('undecided');
+    }
+    setNotice(
+      `${candidates[key].voice.name}を候補から削除しました。記録済みの評価は保持しています。`,
+    );
+  }
   return (
     <section
       className="casting-workspace comparison-panel"
@@ -450,7 +669,7 @@ export function CastingWorkspace({
     >
       <h2>製品をまたいで、声を聴き比べる</h2>
       <p>
-        導入済みのVOICEVOX・AivisSpeechから最大200候補を選べます。AivisSpeechの声質は未校正のため、ここでは推薦スコアを付けずに比較します。
+        VOICEVOX・AivisSpeechの導入済み話者と、ElevenLabsアカウントで利用できる話者を最大200候補まで比較できます。製品別の設定を使い、推薦スコアは付けません。
       </p>
       <p className="footnote">
         AivisSpeechを起動してください。モデルごとの利用条件・クレジットはAivisSpeechで確認できます。
@@ -468,8 +687,11 @@ export function CastingWorkspace({
         </button>
         <button
           className="secondary-button"
-          disabled={locked || checkingModels}
-          onClick={() => void refreshModels()}
+          disabled={locked || checkingModels || checkingElevenModels}
+          onClick={() => {
+            void refreshModels();
+            void refreshElevenModels();
+          }}
         >
           モデル・利用条件を再確認
         </button>
@@ -506,6 +728,111 @@ export function CastingWorkspace({
           ? `（確認：${new Date(inventory.checkedAt).toLocaleTimeString('ja-JP')}）`
           : ''}
       </p>
+      <section aria-label="ElevenLabsの声を選ぶ" className="provider-voices">
+        <h3>ElevenLabs（クラウド）</h3>
+        <p>
+          試聴すると、入力したセリフがElevenLabsへ送信され、アカウントの利用枠を消費します。APIキーはサーバーの環境変数に設定してください。
+        </p>
+        <form
+          className="eleven-voice-search"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (
+              !locked &&
+              !checking &&
+              !elevenVoiceLoading &&
+              inventory?.engines.some((engine) => engine.engine === 'ElevenLabs' && engine.ready)
+            )
+              void loadElevenVoices(null, elevenSearch);
+          }}
+        >
+          <label htmlFor="elevenlabs-search">声を検索</label>
+          <div className="eleven-search-controls">
+            <input
+              type="search"
+              id="elevenlabs-search"
+              value={elevenSearch}
+              maxLength={100}
+              onChange={(event) => setElevenSearch(event.target.value)}
+              disabled={locked || elevenVoiceLoading}
+              placeholder="声の名前や特徴で検索"
+            />
+            <button
+              type="submit"
+              className="secondary-button"
+              disabled={
+                locked ||
+                checking ||
+                elevenVoiceLoading ||
+                !inventory?.engines.some((engine) => engine.engine === 'ElevenLabs' && engine.ready)
+              }
+            >
+              {elevenVoiceLoading ? '声を取得中…' : 'ElevenLabsの声を検索'}
+            </button>
+          </div>
+        </form>
+        {checkingElevenModels && <p role="status">ElevenLabsのモデルを確認中…</p>}
+        {elevenModels && !elevenModels.ready && <p role="alert">{elevenModels.detail}</p>}
+        <label htmlFor="elevenlabs-model">追加する声の合成モデル</label>
+        <select
+          id="elevenlabs-model"
+          value={elevenModelId}
+          disabled={locked || checkingElevenModels || !elevenModels?.ready}
+          onChange={(event) => setElevenModelId(event.target.value)}
+        >
+          <option value="">モデルを選んでください</option>
+          {orderedElevenModels.map((model) => (
+            <option key={model.modelId} value={model.modelId}>
+              {model.name}
+              {model.languages.some((language) => language.id === 'ja')
+                ? '（日本語対応）'
+                : '（日本語対応は未確認）'}
+            </option>
+          ))}
+        </select>
+        <ElevenLabsModelDetails
+          model={elevenModels?.models.find((model) => model.modelId === elevenModelId)}
+          modelId={elevenModelId}
+          checking={checkingElevenModels}
+        />
+        {elevenError && <p role="alert">{elevenError}</p>}
+        {!elevenModelId && !!elevenVoices.length && (
+          <p className="footnote">モデルを選ぶと「比較候補に追加」を使えます。</p>
+        )}
+        {Object.keys(candidates).length >= 200 && (
+          <p className="footnote">
+            比較候補は200件までです。不要なElevenLabsの候補を外してから追加してください。
+          </p>
+        )}
+        <ElevenLabsVoiceResults
+          voices={elevenVoices}
+          candidates={candidates}
+          searched={elevenSearched}
+          resultsSearch={elevenResultsSearch}
+          queryChanged={elevenSearch.trim() !== elevenResultsSearch}
+          loading={elevenVoiceLoading}
+          disabled={locked || checking}
+          canAdd={
+            Object.keys(candidates).length < 200 &&
+            !checkingElevenModels &&
+            !!elevenModelId &&
+            elevenModels?.ready === true
+          }
+          hasMore={elevenHasMore && !!elevenNextCursor}
+          onMore={() => void loadElevenVoices(elevenNextCursor, elevenResultsSearch)}
+          onAdd={addElevenVoice}
+        />
+      </section>
+      <ElevenLabsCandidateManager
+        candidates={candidates}
+        models={orderedElevenModels}
+        slots={pair ?? (singleSlot === 0 ? [selected, null] : [null, selected])}
+        selected={selected}
+        ready={new Set(Object.keys(candidates).filter((key) => !!getAudio(key)))}
+        disabled={locked || checking}
+        onAssign={assignCandidate}
+        onRemove={removeCandidate}
+      />
       {error && <p role="alert">{error}</p>}
       {notice && <p role="status">{notice}</p>}
       {selected && candidates[selected] && <p>保存対象の声：{label(candidates[selected])}</p>}
@@ -533,6 +860,8 @@ export function CastingWorkspace({
                 baseline =
                   originalAudio[key]?.key === originalAudioKey(key) ? originalAudio[key] : null,
                 letter = (pair ? index : singleSlot) === 0 ? 'A' : 'B';
+              const elevenRecipe =
+                candidate.recipe.engine === 'ElevenLabs' ? candidate.recipe : null;
               return (
                 <section
                   className="comparison-candidate"
@@ -583,6 +912,121 @@ export function CastingWorkspace({
                       checking={checkingModels}
                     />
                   )}
+                  {candidate.voice.engine === 'ElevenLabs' && elevenRecipe && (
+                    <div className="recipe-sliders">
+                      <label htmlFor={`casting-${letter}-model`}>合成モデル</label>
+                      <select
+                        id={`casting-${letter}-model`}
+                        value={elevenRecipe.modelId}
+                        disabled={locked || checkingElevenModels || !elevenModels?.ready}
+                        onChange={(event) =>
+                          setCandidates((previous) => ({
+                            ...previous,
+                            [key]: {
+                              ...previous[key],
+                              recipe: (() => {
+                                const model = elevenModels?.models.find(
+                                  (item) => item.modelId === event.target.value,
+                                );
+                                return elevenLabsRecipeSchema.parse({
+                                  ...previous[key].recipe,
+                                  modelId: event.target.value,
+                                  stability:
+                                    model?.modelId === 'eleven_v3'
+                                      ? Math.round(elevenRecipe.stability * 2) / 2
+                                      : elevenRecipe.stability,
+                                  style: model?.canUseStyle ? elevenRecipe.style : 0,
+                                  useSpeakerBoost: model?.canUseSpeakerBoost
+                                    ? elevenRecipe.useSpeakerBoost
+                                    : false,
+                                });
+                              })(),
+                            },
+                          }))
+                        }
+                      >
+                        {!elevenModels?.models.some(
+                          (model) => model.modelId === elevenRecipe.modelId,
+                        ) && (
+                          <option value={elevenRecipe.modelId}>
+                            {elevenRecipe.modelId}（現在利用できません）
+                          </option>
+                        )}
+                        {orderedElevenModels.map((model) => (
+                          <option key={model.modelId} value={model.modelId}>
+                            {model.name}
+                            {model.languages.some((language) => language.id === 'ja')
+                              ? '（日本語対応）'
+                              : '（日本語対応は未確認）'}
+                          </option>
+                        ))}
+                      </select>
+                      <ElevenLabsModelDetails
+                        model={elevenModels?.models.find(
+                          (model) => model.modelId === elevenRecipe.modelId,
+                        )}
+                        modelId={elevenRecipe.modelId}
+                        checking={checkingElevenModels}
+                      />
+                      {(
+                        [
+                          ['stability', '安定性'],
+                          ['similarityBoost', '類似度'],
+                          ...(elevenModels?.models.find(
+                            (model) => model.modelId === elevenRecipe.modelId,
+                          )?.canUseStyle
+                            ? [['style', 'スタイル'] as const]
+                            : []),
+                        ] as const
+                      ).map(([field, title]) => (
+                        <div className="recipe-control" key={field}>
+                          <label htmlFor={`casting-${letter}-${field}`}>{title}</label>
+                          <output htmlFor={`casting-${letter}-${field}`}>
+                            {elevenRecipe[field].toFixed(2)}
+                          </output>
+                          <input
+                            id={`casting-${letter}-${field}`}
+                            type="range"
+                            min="0"
+                            max="1"
+                            step={
+                              field === 'stability' && elevenRecipe.modelId === 'eleven_v3'
+                                ? 0.5
+                                : 0.01
+                            }
+                            value={elevenRecipe[field]}
+                            disabled={locked}
+                            onChange={(event) =>
+                              changeRecipe(key, field, Number(event.target.value))
+                            }
+                          />
+                        </div>
+                      ))}
+                      {elevenModels?.models.find((model) => model.modelId === elevenRecipe.modelId)
+                        ?.canUseSpeakerBoost && (
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={elevenRecipe.useSpeakerBoost}
+                            disabled={locked}
+                            onChange={(event) =>
+                              setCandidates((previous) => ({
+                                ...previous,
+                                [key]: {
+                                  ...previous[key],
+                                  recipe: elevenLabsRecipeSchema.parse({
+                                    ...previous[key].recipe,
+                                    useSpeakerBoost: event.target.checked,
+                                  }),
+                                },
+                              }))
+                            }
+                          />
+                          話者ブースト
+                        </label>
+                      )}
+                    </div>
+                  )}
                   <div className="recipe-sliders">
                     {controls(candidate).map((field) => (
                       <div className="recipe-control" key={field.key}>
@@ -612,13 +1056,26 @@ export function CastingWorkspace({
                       </div>
                     ))}
                   </div>
+                  {elevenRecipe && (
+                    <p className="footnote">
+                      この候補の生成はセリフをElevenLabsへ送信し、利用枠を消費します。元の設定との比較は最大2回の生成です。モデルの入力上限：
+                      {Math.min(
+                        300,
+                        elevenModels?.models.find((model) => model.modelId === elevenRecipe.modelId)
+                          ?.maxCharacters ?? 300,
+                      )}
+                      文字。
+                    </p>
+                  )}
                   {!entry && (
                     <button
                       className="secondary-button"
                       disabled={locked || checking || !available.has(key) || !text.trim()}
                       onClick={() => void generate(key)}
                     >
-                      候補{letter}の音声を生成
+                      {elevenRecipe
+                        ? `ElevenLabsへ送信して候補${letter}を試聴`
+                        : `候補${letter}の音声を生成`}
                     </button>
                   )}
                   {origin && (
@@ -631,7 +1088,9 @@ export function CastingWorkspace({
                         disabled={locked || checking || !available.has(key) || !text.trim()}
                         onClick={() => void generate(key, true)}
                       >
-                        元の設定と候補{letter}を生成
+                        {elevenRecipe
+                          ? `ElevenLabsへ送信して元の設定と候補${letter}を生成`
+                          : `元の設定と候補${letter}を生成`}
                       </button>
                       {baseline && (
                         <div className="comparison-audio">
@@ -662,6 +1121,12 @@ export function CastingWorkspace({
                         aria-label={`製品比較候補${letter}の試聴`}
                         onPlay={pauseOtherAudio}
                       />
+                      {elevenRecipe && (
+                        <p>
+                          生成モデル：{entry.generation?.modelId ?? elevenRecipe.modelId} ／
+                          22,050Hz・16bit・モノラルWAV
+                        </p>
+                      )}
                       {candidate.voice.engine === 'AivisSpeech' && (
                         <>
                           <p>この試聴音声のモデル版：{entry.modelInfo?.modelVersion ?? '未取得'}</p>
@@ -683,7 +1148,9 @@ export function CastingWorkspace({
                         disabled={locked || checking || !available.has(key) || !text.trim()}
                         onClick={() => void generate(key)}
                       >
-                        候補{letter}の音声を再生成
+                        {elevenRecipe
+                          ? `ElevenLabsへ送信して候補${letter}を再生成`
+                          : `候補${letter}の音声を再生成`}
                       </button>
                       <a
                         href={entry.url}
@@ -738,7 +1205,11 @@ export function CastingWorkspace({
             }
             onClick={() => void generate()}
           >
-            {busy ? '製品比較音声を生成中…' : '製品比較のA・Bを生成'}
+            {busy
+              ? '製品比較音声を生成中…'
+              : pair?.some((key) => candidates[key]?.voice.engine === 'ElevenLabs')
+                ? 'ElevenLabsへ送信して製品比較のA・Bを生成'
+                : '製品比較のA・Bを生成'}
           </button>
           {busy && (
             <button className="secondary-button" onClick={() => requestRef.current?.abort()}>
@@ -858,14 +1329,7 @@ export function CastingWorkspace({
                       <strong>
                         {j === 0 ? 'A' : 'B'}：{candidate.recipe.engine}
                       </strong>
-                      <p>
-                        {controls(candidate)
-                          .map(
-                            (field) =>
-                              `${field.label}：${Number((candidate.recipe as unknown as Record<string, unknown>)[field.key]).toFixed(2)}${field.unit}`,
-                          )
-                          .join(' ／ ')}
-                      </p>
+                      <p>{castingRecipeSummary(candidate)}</p>
                     </div>
                   ))}
                 </details>
@@ -882,7 +1346,7 @@ export function CastingWorkspace({
         </details>
       )}
       <p className="footnote">
-        比較セッションはVOICEVOX・AivisSpeechの製品別調声値を保存します。音声は含まず、復元後は再生成します。従来のレシピJSONは「レシピJSONを読み込む」から復元できます。
+        比較セッションは製品別の調声値を保存します。音声とAPIキーは含まず、復元後は再生成します。ElevenLabsを使う場合はセリフをクラウドへ送信し、利用枠を消費します。従来のレシピJSONは「レシピJSONを読み込む」から復元できます。
       </p>
     </section>
   );

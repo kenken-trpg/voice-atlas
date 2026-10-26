@@ -9,9 +9,15 @@ import { recommend } from '../shared/recommend';
 import type { Config } from './config';
 import { analyzeCharacter, AppError, capabilities, type Fetcher } from './services';
 import { createTtsAdapter } from './tts';
-import { castingPreviewSchema } from '../shared/casting';
+import { castingPreviewSchema, generationSchema } from '../shared/casting';
 import { castingInventory, castingSynthesize } from './tts/casting';
 import { getAivisModelInfo } from './tts/aivis-model-info';
+import { elevenLabsClient } from './tts/elevenlabs';
+import {
+  elevenLabsModelsResponseSchema,
+  elevenLabsVoicePageSchema,
+  elevenLabsCursorSchema,
+} from '../shared/elevenlabs';
 import { irodoriCandidates } from '../shared/irodori-candidates';
 
 const localIrodoriSamples = new Map<string, string>(
@@ -22,6 +28,7 @@ const localIrodoriSamples = new Map<string, string>(
 
 export function createApp(config: Config, fetcher: Fetcher = fetch) {
   const app = express();
+  const cloud = elevenLabsClient(config, fetcher);
   app.disable('x-powered-by');
   app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -59,6 +66,17 @@ export function createApp(config: Config, fetcher: Fetcher = fetch) {
       return await work();
     } finally {
       busy = false;
+    }
+  };
+  let cloudBusy = false;
+  const runCloudExclusive = async <T>(work: () => Promise<T>) => {
+    if (cloudBusy)
+      throw new AppError(429, 'ElevenLabsで生成中です。完了後にもう一度お試しください。');
+    cloudBusy = true;
+    try {
+      return await work();
+    } finally {
+      cloudBusy = false;
     }
   };
   app.get('/api/health', (_req, res) => res.json({ ok: true, version: '0.1.0' }));
@@ -125,19 +143,60 @@ export function createApp(config: Config, fetcher: Fetcher = fetch) {
   });
   let pendingCasting: ReturnType<typeof castingInventory> | undefined;
   app.get('/api/casting/voices', async (_req, res) => {
-    pendingCasting ??= castingInventory(config, fetcher).finally(() => {
+    pendingCasting ??= castingInventory(config, fetcher, cloud).finally(() => {
       pendingCasting = undefined;
     });
     res.json(await pendingCasting);
   });
+  app.get('/api/casting/elevenlabs/models', async (_req, res) => {
+    try {
+      const models = await cloud.listModels();
+      res.json(
+        elevenLabsModelsResponseSchema.parse({
+          ready: models.length > 0,
+          detail: models.length
+            ? 'モデル一覧を取得しました。'
+            : '利用できる音声合成モデルがありません。',
+          checkedAt: new Date().toISOString(),
+          models,
+        }),
+      );
+    } catch (error) {
+      res.json(
+        elevenLabsModelsResponseSchema.parse({
+          ready: false,
+          detail:
+            error instanceof AppError
+              ? error.message
+              : 'ElevenLabsのモデル一覧を取得できませんでした。',
+          checkedAt: new Date().toISOString(),
+          models: [],
+        }),
+      );
+    }
+  });
+  app.get('/api/casting/elevenlabs/voices', async (req, res) => {
+    const query = z
+      .object({ search: z.string().max(100).optional(), cursor: elevenLabsCursorSchema.optional() })
+      .parse(req.query);
+    try {
+      const page = await cloud.listVoices(query.search ?? '', query.cursor ?? null);
+      res.json(elevenLabsVoicePageSchema.parse(page));
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+      throw new AppError(502, 'ElevenLabsの声一覧を取得できませんでした。');
+    }
+  });
   app.post('/api/casting/preview', async (req, res) => {
     const input = castingPreviewSchema.parse(req.body);
-    const result = await runExclusive(() =>
-      castingSynthesize(config, input.candidate, input.text, fetcher),
+    const exclusive =
+      input.candidate.voice.engine === 'ElevenLabs' ? runCloudExclusive : runExclusive;
+    const result = await exclusive(() =>
+      castingSynthesize(config, input.candidate, input.text, fetcher, cloud),
     );
     res.setHeader(
       'X-Voice-Atlas-Generation',
-      encodeURIComponent(JSON.stringify(result.generation)),
+      encodeURIComponent(JSON.stringify(generationSchema.parse(result.generation))),
     );
     res.type('audio/wav').send(result.wav);
   });

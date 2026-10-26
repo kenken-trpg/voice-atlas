@@ -52,12 +52,14 @@ describe('casting board', () => {
   it('keeps native variation parameters and current audition evidence', () => {
     const record = comparison();
     const parent = record.entries[0];
+    const parentRecipe = libraryCandidate(parent).recipe;
+    if (parentRecipe.engine === 'ElevenLabs') throw new Error('Expected local recipe');
     const variant = makeVoiceVariation(
       parent,
       {
         candidate: {
           ...libraryCandidate(parent),
-          recipe: { ...libraryCandidate(parent).recipe, speedScale: 0.7 },
+          recipe: { ...parentRecipe, speedScale: 0.7 },
         },
         text: '旧セリフ',
         generation: null,

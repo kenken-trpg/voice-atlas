@@ -26,7 +26,9 @@ async function open(page: Page) {
     }),
   );
   await page.goto('/');
-  await page.getByRole('button', { name: 'VOICEVOX・AivisSpeechを比較する', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'VOICEVOX・AivisSpeech・ElevenLabsを比較する', exact: true })
+    .click();
   await expect(page.locator('#casting-A')).toBeVisible();
   return page.getByRole('region', { name: '製品横断の比較', exact: true });
 }
@@ -62,7 +64,9 @@ test('registers adopted voice, persists edits across reload and reuses native tu
   const saved = await exported(page, library, '採用声ライブラリJSONを保存');
   expect(saved.entries[0].evaluation).toEqual(record);
   await page.reload();
-  await page.getByRole('button', { name: 'VOICEVOX・AivisSpeechを比較する', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'VOICEVOX・AivisSpeech・ElevenLabsを比較する', exact: true })
+    .click();
   await page.getByText('キャラクターの採用声ライブラリ', { exact: true }).click();
   await expect(library.getByText('案内人 / 囁きの演技', { exact: true })).toBeVisible();
   await workspace

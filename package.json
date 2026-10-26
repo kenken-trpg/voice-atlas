@@ -21,6 +21,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "probe:aivis": "tsx server/aivis-probe.ts",
+    "probe:elevenlabs": "tsx server/elevenlabs-probe.ts",
     "evaluate:voice": "tsx server/listening-probe.ts",
     "evaluate:vision": "tsx server/vision-evaluation.ts",
     "evaluate:irodori": "tsx server/irodori-probe.ts"

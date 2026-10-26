@@ -10,15 +10,21 @@ import { createAivisClient } from './aivis';
 import { findVoicevoxStyle } from '../../shared/voicevox';
 import { AppError, type Fetcher } from '../remote';
 import type { Config } from '../config';
+import { elevenLabsClient, type ElevenLabsClient } from './elevenlabs';
 
 export async function castingInventory(
   config: Config,
   fetcher: Fetcher,
+  cloud: ElevenLabsClient = elevenLabsClient(config, fetcher),
 ): Promise<CastingInventory> {
-  const [vv, aivis] = await Promise.allSettled([
-    createTtsAdapter(config, 'VOICEVOX', fetcher).listSpeakers(),
-    createAivisClient(config.aivisUrl || 'http://127.0.0.1:10101', fetcher).listSpeakers(),
+  const [local, elevenLabs] = await Promise.all([
+    Promise.allSettled([
+      createTtsAdapter(config, 'VOICEVOX', fetcher).listSpeakers(),
+      createAivisClient(config.aivisUrl || 'http://127.0.0.1:10101', fetcher).listSpeakers(),
+    ]),
+    cloud.status(),
   ]);
+  const [vv, aivis] = local;
   const available: CastingVoice[] = [];
   if (vv.status === 'fulfilled')
     voices
@@ -58,14 +64,17 @@ export async function castingInventory(
       [
         ['VOICEVOX', vv],
         ['AivisSpeech', aivis],
+        ['ElevenLabs', elevenLabs],
       ] as const
     ).map(([engine, result]) => ({
       engine,
-      ready: result.status === 'fulfilled',
+      ready: engine === 'ElevenLabs' ? result.ready : result.status === 'fulfilled',
       detail:
-        result.status === 'fulfilled'
-          ? '接続済み'
-          : '未接続：アプリまたはエンジンを起動してください',
+        engine === 'ElevenLabs'
+          ? result.detail
+          : result.status === 'fulfilled'
+            ? '接続済み'
+            : '未接続：アプリまたはエンジンを起動してください',
     })),
     voices: available.filter((voice) => counts.get(castingKey(voice)) === 1).slice(0, 200),
   };
@@ -75,6 +84,7 @@ export async function castingSynthesize(
   candidate: CastingCandidate,
   text: string,
   fetcher: Fetcher,
+  cloud: ElevenLabsClient = elevenLabsClient(config, fetcher),
 ) {
   if (candidate.voice.engine === 'AivisSpeech' && candidate.recipe.engine === 'AivisSpeech') {
     const result = await createAivisClient(
@@ -111,6 +121,22 @@ export async function castingSynthesize(
         engine: 'VOICEVOX' as const,
         engineVersion: result.engineInfo?.version ?? null,
         checkedAt: result.engineInfo?.checkedAt ?? new Date().toISOString(),
+      },
+    };
+  }
+  if (candidate.voice.engine === 'ElevenLabs' && candidate.recipe.engine === 'ElevenLabs') {
+    const result = await cloud.synthesize({
+      voiceId: candidate.voice.voiceId,
+      text,
+      recipe: candidate.recipe,
+    });
+    return {
+      wav: result.wav,
+      generation: {
+        engine: 'ElevenLabs' as const,
+        engineVersion: null,
+        checkedAt: new Date().toISOString(),
+        ...result.generation,
       },
     };
   }

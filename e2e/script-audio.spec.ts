@@ -34,7 +34,9 @@ async function open(page: Page) {
   return { panel, output: panel.getByRole('region', { name: '台本の結合WAV', exact: true }) };
 }
 async function expand(page: Page) {
-  await page.getByRole('button', { name: 'VOICEVOX・AivisSpeechを比較する', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'VOICEVOX・AivisSpeech・ElevenLabsを比較する', exact: true })
+    .click();
   await page.getByText('キャラクターの採用声ライブラリ', { exact: true }).click();
   await page.getByText('台本を作成・試聴する', { exact: true }).click();
 }

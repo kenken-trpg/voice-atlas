@@ -3,6 +3,7 @@ import { aivisRecipeSchema } from './aivis';
 import { characterInputSchema, profileSchema, recipeSchema, recipeFields } from './schema';
 import { voices } from './catalog';
 import { aivisModelInfoSchema } from './aivis-model-info';
+import { elevenLabsRecipeSchema, elevenLabsVoiceSchema } from './elevenlabs';
 export const maxCastingSessionFileBytes = 8 * 1024 * 1024;
 
 export const castingVoiceSchema = z.discriminatedUnion('engine', [
@@ -18,11 +19,13 @@ export const castingVoiceSchema = z.discriminatedUnion('engine', [
     name: z.string().min(1).max(200),
     style: z.string().min(1).max(200),
   }),
+  elevenLabsVoiceSchema,
 ]);
 export type CastingVoice = z.infer<typeof castingVoiceSchema>;
 export const nativeRecipeSchema = z.discriminatedUnion('engine', [
   recipeSchema.extend({ engine: z.literal('VOICEVOX') }).strict(),
   aivisRecipeSchema,
+  elevenLabsRecipeSchema,
 ]);
 export type NativeRecipe = z.infer<typeof nativeRecipeSchema>;
 // Historic identities remain valid records even when today's catalog has changed.
@@ -64,10 +67,12 @@ export type CastingCandidate = z.infer<typeof castingCandidateSchema>;
 export function castingKey(voice: CastingVoice) {
   return voice.engine === 'VOICEVOX'
     ? `VOICEVOX:${voice.voiceId}`
-    : JSON.stringify(['AivisSpeech', voice.speakerUuid.toLowerCase(), voice.style]);
+    : voice.engine === 'AivisSpeech'
+      ? JSON.stringify(['AivisSpeech', voice.speakerUuid.toLowerCase(), voice.style])
+      : JSON.stringify(['ElevenLabs', voice.voiceId]);
 }
 export const generationSchema = z.object({
-  engine: z.enum(['VOICEVOX', 'AivisSpeech']),
+  engine: z.enum(['VOICEVOX', 'AivisSpeech', 'ElevenLabs']),
   engineVersion: z
     .string()
     .min(1)
@@ -76,6 +81,10 @@ export const generationSchema = z.object({
     .nullable(),
   checkedAt: z.iso.datetime(),
   observedStyleId: z.number().int().min(-2147483648).max(2147483647).optional(),
+  modelId: z.string().min(1).max(100).optional(),
+  outputFormat: z.literal('pcm_22050').optional(),
+  seed: z.number().int().min(0).max(4294967295).nullable().optional(),
+  requestId: z.string().max(200).optional(),
 });
 export const castingPreviewSchema = z.object({
   candidate: castingCandidateSchema,
@@ -136,7 +145,7 @@ export const castingInventorySchema = z.object({
   checkedAt: z.iso.datetime(),
   engines: z.array(
     z.object({
-      engine: z.enum(['VOICEVOX', 'AivisSpeech']),
+      engine: z.enum(['VOICEVOX', 'AivisSpeech', 'ElevenLabs']),
       ready: z.boolean(),
       detail: z.string().max(300),
     }),
@@ -146,6 +155,7 @@ export const castingInventorySchema = z.object({
 export type CastingInventory = z.infer<typeof castingInventorySchema>;
 
 export function castingRecipeFields(candidate: CastingCandidate) {
+  if (candidate.recipe.engine === 'ElevenLabs') return [];
   const fields = recipeFields.map((field) =>
     candidate.recipe.engine === 'AivisSpeech' && field.key === 'intonationScale'
       ? {
@@ -171,4 +181,16 @@ export function castingRecipeFields(candidate: CastingCandidate) {
         },
       ]
     : fields;
+}
+
+export function castingRecipeSummary(candidate: CastingCandidate) {
+  const recipe = candidate.recipe;
+  if (recipe.engine === 'ElevenLabs')
+    return `合成モデル：${recipe.modelId} ／ 安定性：${recipe.stability.toFixed(2)} ／ 類似度：${recipe.similarityBoost.toFixed(2)} ／ スタイル：${recipe.style.toFixed(2)} ／ 話者ブースト：${recipe.useSpeakerBoost ? '有効' : '無効'} ／ シード：${recipe.seed ?? '未指定'} ／ 出力形式：${recipe.outputFormat}`;
+  return castingRecipeFields(candidate)
+    .map(
+      (field) =>
+        `${field.label}：${Number((recipe as unknown as Record<string, number>)[field.key]).toFixed(2)}${field.unit}`,
+    )
+    .join(' ／ ');
 }

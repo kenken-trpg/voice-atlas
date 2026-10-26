@@ -94,6 +94,7 @@ describe('character voice library', () => {
       reason: '用途の変更',
     };
     const first = makeVoiceVariation(parent, snapshot, '説明', '');
+    if (snapshot.candidate.recipe.engine === 'ElevenLabs') throw new Error('Expected local recipe');
     const second = makeVoiceVariation(
       first,
       {
@@ -177,6 +178,7 @@ describe('character voice library', () => {
   it('replaces only the requested configuration and retains the source evaluation', () => {
     const entry = makeLibraryEntry(makeCastingEvaluation(), '名', '通常', '');
     const [a, b] = entry.evaluation.candidates;
+    if (a.recipe.engine === 'ElevenLabs') throw new Error('Expected local recipe');
     const original = {
       [castingKey(a.voice)]: { ...a, recipe: { ...a.recipe, speedScale: 1.5 } },
       [castingKey(b.voice)]: b,
