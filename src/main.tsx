@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   ArrowDownToLine,
@@ -45,7 +45,6 @@ import {
   type EngineInfo,
 } from '../shared/evaluation-evidence';
 import { ComparisonPanel, pauseOtherAudio } from './components/ComparisonPanel';
-import { EvaluationWorkbench } from './components/EvaluationWorkbench';
 import { CastingWorkspace } from './components/CastingWorkspace';
 import { HelpTip } from './components/HelpTip';
 import { VoiceMark } from './components/VoiceMark';
@@ -59,6 +58,12 @@ import { ProjectPanel, type ProductionStep } from './components/ProjectPanel';
 import { ConnectionGuide } from './components/ConnectionGuide';
 import { IrodoriCandidates } from './components/IrodoriCandidates';
 import './styles.css';
+
+const EvaluationWorkbench = lazy(() =>
+  import('./components/EvaluationWorkbench').then((module) => ({
+    default: module.EvaluationWorkbench,
+  })),
+);
 
 type Mode = 'manual' | Provider;
 type ImageData = { url: string; name: string };
@@ -146,6 +151,7 @@ function App() {
     restoredRecipe && restoredRecipe.version !== 1 ? restoredRecipe.evaluations : [],
   );
   const [evaluationOpen, setEvaluationOpen] = useState(false);
+  const [evaluationLoaded, setEvaluationLoaded] = useState(false);
   const [castingOpen, setCastingOpen] = useState(false);
   const [notice, setNotice] = useState('');
   const [loadingRecipe, setLoadingRecipe] = useState(false);
@@ -716,7 +722,10 @@ function App() {
             className="secondary-button"
             aria-expanded={evaluationOpen}
             aria-controls="evaluation-workbench"
-            onClick={() => setEvaluationOpen(!evaluationOpen)}
+            onClick={() => {
+              setEvaluationLoaded(true);
+              setEvaluationOpen(!evaluationOpen);
+            }}
           >
             {evaluationOpen ? '評価記録の集計を閉じる' : '評価記録をまとめる'}
           </button>
@@ -740,7 +749,11 @@ function App() {
           />
         </div>
         <div hidden={!evaluationOpen}>
-          <EvaluationWorkbench currentEvaluations={evaluations} />
+          {evaluationLoaded && (
+            <Suspense fallback={<p role="status">評価記録を読み込み中…</p>}>
+              <EvaluationWorkbench currentEvaluations={evaluations} />
+            </Suspense>
+          )}
         </div>
         {notice && (
           <p className="recipe-notice" role="status">
