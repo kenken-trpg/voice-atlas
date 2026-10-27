@@ -130,3 +130,15 @@ test('blocks project switching while generating and can cancel then retry the pr
     }, projectLibraryStorageKey),
   ).toBe('導入シナリオ');
 });
+
+test('loads the connection guide only when opened', async ({ page }) => {
+  const loaded: string[] = [];
+  page.on('request', (request) => {
+    if (/\/assets\/ConnectionGuide-.*\.js/.test(request.url())) loaded.push(request.url());
+  });
+  await page.goto('/');
+  expect(loaded).toHaveLength(0);
+  await page.getByText('はじめての試聴・接続を確認する', { exact: true }).click();
+  await expect(page.getByRole('region', { name: 'はじめての音声試聴' })).toBeVisible();
+  expect(loaded).toHaveLength(1);
+});

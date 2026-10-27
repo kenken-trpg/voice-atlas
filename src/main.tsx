@@ -54,7 +54,6 @@ import { CharacterContext } from './components/CharacterContext';
 import { jsonRequest, download } from './lib/http';
 import { ProjectProvider, useProject, useProjectPart } from './lib/project-context';
 import { ProjectPanel, type ProductionStep } from './components/ProjectPanel';
-import { ConnectionGuide } from './components/ConnectionGuide';
 import { IrodoriCandidates } from './components/IrodoriCandidates';
 import './styles.css';
 
@@ -68,6 +67,10 @@ const ListeningComparison = lazy(() =>
   import('./components/ListeningComparison').then((module) => ({
     default: module.ListeningComparison,
   })),
+);
+
+const ConnectionGuide = lazy(() =>
+  import('./components/ConnectionGuide').then((module) => ({ default: module.ConnectionGuide })),
 );
 
 type Mode = 'manual' | Provider;
@@ -167,6 +170,8 @@ function App() {
   const connectionGeneration = useRef(0);
   const [busy, setBusy] = useState<'analysis' | 'audio' | null>(null);
   const [guideBusy, setGuideBusy] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [guideLoaded, setGuideLoaded] = useState(false);
   const [loadingImage, setLoadingImage] = useState(false);
   const [error, setError] = useState('');
   const [visualCorrection, setVisualCorrection] = useState('');
@@ -701,10 +706,25 @@ function App() {
           </div>
         </section>
         <ProjectPanel onNavigate={navigateProduction} />
-        <ConnectionGuide
-          disabled={Boolean(busy) || loadingImage || loadingRecipe}
-          onBusyChange={setGuideBusy}
-        />
+        <details
+          className="connection-guide"
+          onToggle={(event) => {
+            const opened = event.currentTarget.open;
+            setGuideOpen(opened);
+            if (opened) setGuideLoaded(true);
+          }}
+        >
+          <summary>はじめての試聴・接続を確認する</summary>
+          {guideLoaded && (
+            <Suspense fallback={<p role="status">接続ガイドを読み込み中…</p>}>
+              <ConnectionGuide
+                opened={guideOpen}
+                disabled={Boolean(busy) || loadingImage || loadingRecipe}
+                onBusyChange={setGuideBusy}
+              />
+            </Suspense>
+          )}
+        </details>
         <IrodoriCandidates />
         <details
           className="listening-comparison"
