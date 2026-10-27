@@ -41,6 +41,11 @@ test('compares runs, verifies audio integrity and restores notes without generat
   await first.getByLabel('採用判断').selectOption('adopt');
   await first.getByLabel('読み違い・音の問題・判断理由').fill('語尾が役柄に合う');
   await region.getByLabel('評価者', { exact: true }).fill('評価担当');
+  const summary = page.getByText('実機評価の音声・待ち時間・聴取メモを比較する', { exact: true });
+  await summary.click();
+  await summary.click();
+  await expect(region.getByLabel('評価者', { exact: true })).toHaveValue('評価担当');
+  await expect(region.locator('audio')).toHaveCount(6);
   await region.screenshot({ path: testInfo.outputPath('comparison.png') });
   const corrupted = Buffer.from(listeningWav);
   corrupted[corrupted.length - 1] ^= 1;
@@ -80,4 +85,16 @@ test('compares runs, verifies audio integrity and restores notes without generat
   await expect(region.locator('audio')).toHaveCount(6);
   expect(synthesis).toBe(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('loads the listening comparison only when opened', async ({ page }) => {
+  const loaded: string[] = [];
+  page.on('request', (request) => {
+    if (/\/assets\/ListeningComparison-.*\.js/.test(request.url())) loaded.push(request.url());
+  });
+  await page.goto('/');
+  expect(loaded).toHaveLength(0);
+  await page.getByText('実機評価の音声・待ち時間・聴取メモを比較する', { exact: true }).click();
+  await expect(page.getByRole('region', { name: '実機評価結果の比較' })).toBeVisible();
+  expect(loaded).toHaveLength(1);
 });
