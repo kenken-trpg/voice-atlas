@@ -277,6 +277,7 @@ test('production serves a restricted document and immutable bundled assets', asy
   const response = await page.goto('/');
   const headers = response!.headers();
   expect(headers['x-frame-options']).toBe('DENY');
+  expect(headers['permissions-policy']).toBe('camera=(), microphone=(), geolocation=()');
   expect(headers['content-security-policy']).toContain("script-src 'self'");
   const source = await page.locator('script[src]').first().getAttribute('src');
   const asset = await page.request.get(source!);
