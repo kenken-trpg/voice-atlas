@@ -42,3 +42,15 @@ test('production entry opens nested workspaces and preserves edits across naviga
   expect(synthesis).toBe(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
+
+test('loads the evaluation workbench only when opened', async ({ page }) => {
+  const loaded: string[] = [];
+  page.on('request', (request) => {
+    if (/\/assets\/EvaluationWorkbench-.*\.js/.test(request.url())) loaded.push(request.url());
+  });
+  await page.goto('/');
+  expect(loaded).toHaveLength(0);
+  await page.getByRole('button', { name: '評価記録をまとめる' }).click();
+  await expect(page.getByRole('region', { name: '評価記録の集計' })).toBeVisible();
+  expect(loaded).toHaveLength(1);
+});
