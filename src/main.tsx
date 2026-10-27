@@ -53,7 +53,6 @@ import { AvailabilityBadge, AvailabilityHelp } from './components/AvailabilityBa
 import { CharacterContext } from './components/CharacterContext';
 import { jsonRequest, download } from './lib/http';
 import { ProjectProvider, useProject, useProjectPart } from './lib/project-context';
-import { ListeningComparison } from './components/ListeningComparison';
 import { ProjectPanel, type ProductionStep } from './components/ProjectPanel';
 import { ConnectionGuide } from './components/ConnectionGuide';
 import { IrodoriCandidates } from './components/IrodoriCandidates';
@@ -62,6 +61,12 @@ import './styles.css';
 const EvaluationWorkbench = lazy(() =>
   import('./components/EvaluationWorkbench').then((module) => ({
     default: module.EvaluationWorkbench,
+  })),
+);
+
+const ListeningComparison = lazy(() =>
+  import('./components/ListeningComparison').then((module) => ({
+    default: module.ListeningComparison,
   })),
 );
 
@@ -152,6 +157,7 @@ function App() {
   );
   const [evaluationOpen, setEvaluationOpen] = useState(false);
   const [evaluationLoaded, setEvaluationLoaded] = useState(false);
+  const [listeningLoaded, setListeningLoaded] = useState(false);
   const [castingOpen, setCastingOpen] = useState(false);
   const [notice, setNotice] = useState('');
   const [loadingRecipe, setLoadingRecipe] = useState(false);
@@ -700,7 +706,19 @@ function App() {
           onBusyChange={setGuideBusy}
         />
         <IrodoriCandidates />
-        <ListeningComparison />
+        <details
+          className="listening-comparison"
+          onToggle={(event) => {
+            if (event.currentTarget.open) setListeningLoaded(true);
+          }}
+        >
+          <summary>実機評価の音声・待ち時間・聴取メモを比較する</summary>
+          {listeningLoaded && (
+            <Suspense fallback={<p role="status">比較画面を読み込み中…</p>}>
+              <ListeningComparison />
+            </Suspense>
+          )}
+        </details>
         <div className="recipe-import">
           <button
             className="secondary-button"
