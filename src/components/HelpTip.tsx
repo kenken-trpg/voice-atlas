@@ -9,11 +9,22 @@ export function HelpTip({ label, children }: { label: string; children: string }
     const reposition = () => {
       if (tip.current?.matches(':popover-open') && trigger.current) place(trigger.current);
     };
-    window.addEventListener('scroll', reposition, true);
-    window.addEventListener('resize', reposition);
-    return () => {
+    const popover = tip.current;
+    const stopListening = () => {
       window.removeEventListener('scroll', reposition, true);
       window.removeEventListener('resize', reposition);
+    };
+    const toggle = () => {
+      stopListening();
+      if (popover?.matches(':popover-open')) {
+        window.addEventListener('scroll', reposition, true);
+        window.addEventListener('resize', reposition);
+      }
+    };
+    popover?.addEventListener('toggle', toggle);
+    return () => {
+      stopListening();
+      popover?.removeEventListener('toggle', toggle);
     };
   }, []);
   function place(button: HTMLButtonElement) {

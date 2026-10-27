@@ -201,12 +201,22 @@ test('failed or cancelled preview cannot create a new variant', async ({ page })
   await expect(
     candidate.getByRole('button', { name: '調整した声を別設定で保存', exact: true }),
   ).toBeDisabled();
+  let releasePreview!: () => void;
+  let previewStarted!: () => void;
+  const started = new Promise<void>((resolve) => (previewStarted = resolve));
+  const release = new Promise<void>((resolve) => (releasePreview = resolve));
   await page.route('**/api/casting/preview', async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    previewStarted();
+    await release;
     await route.fulfill({ contentType: 'audio/wav', body: wav() }).catch(() => {});
   });
-  await candidate.getByRole('button', { name: '元の設定と候補Aを生成', exact: true }).click();
-  await page.getByRole('button', { name: '製品比較の生成を中止', exact: true }).click();
+  try {
+    await candidate.getByRole('button', { name: '元の設定と候補Aを生成', exact: true }).click();
+    await started;
+    await page.getByRole('button', { name: '製品比較の生成を中止', exact: true }).click();
+  } finally {
+    releasePreview();
+  }
   await expect(
     candidate.getByRole('button', { name: '調整した声を別設定で保存', exact: true }),
   ).toBeDisabled();
