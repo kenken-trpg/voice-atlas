@@ -110,6 +110,8 @@ test('takes three NPCs and ten lines through casting, audio archive and editing 
   page,
   browser,
 }, testInfo) => {
+  // This end-to-end journey creates ten audio lines and restores them in a second browser.
+  test.setTimeout(60_000);
   const generated = await mockEngines(page, true);
   await page.goto('/');
   await page
