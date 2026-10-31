@@ -45,7 +45,6 @@ import {
   type EngineInfo,
 } from '../shared/evaluation-evidence';
 import { ComparisonPanel, pauseOtherAudio } from './components/ComparisonPanel';
-import { CastingWorkspace } from './components/CastingWorkspace';
 import { HelpTip } from './components/HelpTip';
 import { VoiceMark } from './components/VoiceMark';
 import { RecipeControls } from './components/RecipeControls';
@@ -71,6 +70,20 @@ const ListeningComparison = lazy(() =>
 
 const ConnectionGuide = lazy(() =>
   import('./components/ConnectionGuide').then((module) => ({ default: module.ConnectionGuide })),
+);
+
+function CastingWorkspaceUnavailable() {
+  return (
+    <div className="error-banner" role="alert">
+      製品比較と台本の画面を読み込めませんでした。作品の保存・復元も止めています。ページを再読み込みしてください。
+    </div>
+  );
+}
+
+const CastingWorkspace = lazy(() =>
+  import('./components/CastingWorkspace')
+    .then((module) => ({ default: module.CastingWorkspace }))
+    .catch(() => ({ default: CastingWorkspaceUnavailable })),
 );
 
 type Mode = 'manual' | Provider;
@@ -626,7 +639,8 @@ function App() {
       : Boolean(caps?.[mode]?.ready));
   function navigateProduction(step: ProductionStep) {
     if (step !== 'discovery') setCastingOpen(true);
-    requestAnimationFrame(() => {
+    let frames = 300;
+    requestAnimationFrame(function reveal() {
       const target = document.getElementById(
         step === 'discovery'
           ? 'workspace'
@@ -636,7 +650,11 @@ function App() {
               ? 'production-audio-storage'
               : 'production-script',
       );
-      if (!target) return;
+      if (!target) {
+        // The casting workspace chunk may still be loading right after startup.
+        if (step !== 'discovery' && --frames > 0) requestAnimationFrame(reveal);
+        return;
+      }
       let parent = target.parentElement;
       while (parent) {
         if (parent instanceof HTMLDetailsElement) parent.open = true;
@@ -779,12 +797,14 @@ function App() {
           </button>
         </div>
         <div id="casting-workspace">
-          <CastingWorkspace
-            open={castingOpen}
-            disabled={disabled}
-            profile={profile}
-            characterInput={profileInput}
-          />
+          <Suspense fallback={castingOpen ? <p role="status">製品比較を読み込み中…</p> : null}>
+            <CastingWorkspace
+              open={castingOpen}
+              disabled={disabled}
+              profile={profile}
+              characterInput={profileInput}
+            />
+          </Suspense>
         </div>
         <div hidden={!evaluationOpen}>
           {evaluationLoaded && (

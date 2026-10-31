@@ -24,7 +24,7 @@ export function ProjectArchive({
   getProject: () => VoiceProject;
   onLockChange: (locked: boolean) => void;
 }) {
-  const { ensureIdle, transition } = useProject();
+  const { ensureIdle, transition, partsReady } = useProject();
   const [pending, setPending] = useState<Archive | null>(null);
   const [usage, setUsage] = useState<AudioUsage | null>(null);
   const [usageUnavailable, setUsageUnavailable] = useState(false);
@@ -35,8 +35,10 @@ export function ProjectArchive({
   const fileRef = useRef<HTMLInputElement>(null);
   const controller = useRef<AbortController | null>(null);
   const getter = useRef(getProject);
+  const ready = useRef(partsReady);
   useLayoutEffect(() => {
     getter.current = getProject;
+    ready.current = partsReady;
   });
   const signature = () => {
     const project = getter.current();
@@ -46,7 +48,7 @@ export function ProjectArchive({
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | undefined;
     const captureBaseline = () => {
-      if (baseline.current !== null) return;
+      if (baseline.current !== null || !ready.current) return;
       try {
         baseline.current = signature();
         if (timer) clearInterval(timer);

@@ -21,7 +21,7 @@ import { ProjectArchive } from './ProjectArchive';
 export type ProductionStep = 'discovery' | 'casting' | 'script' | 'audio-storage';
 
 export function ProjectPanel({ onNavigate }: { onNavigate: (step: ProductionStep) => void }) {
-  const { initial, loadError, capture, ensureIdle, commit, transition } = useProject();
+  const { initial, loadError, partsReady, capture, ensureIdle, commit, transition } = useProject();
   const [name, setName] = useState(initial?.name ?? '新しい作品');
   const [saved, setSaved] = useState(initial);
   const [pending, setPending] = useState<VoiceProject | null>(null);
@@ -32,7 +32,7 @@ export function ProjectPanel({ onNavigate }: { onNavigate: (step: ProductionStep
   const [loading, setLoading] = useState(false);
   const [archiveLocked, setArchiveLocked] = useState(false);
   const [libraryLocked, setLibraryLocked] = useState(false);
-  const locked = loading || archiveLocked || libraryLocked;
+  const locked = loading || archiveLocked || libraryLocked || !partsReady;
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [dirty, setDirty] = useState(false);
@@ -46,6 +46,7 @@ export function ProjectPanel({ onNavigate }: { onNavigate: (step: ProductionStep
         setConflict(projectChangedElsewhere(localStorage));
         setSaved(stored);
         if (!stored) {
+          if (!partsReady) return;
           const snapshot = JSON.stringify(capture());
           baseline.current ??= snapshot;
           setDirty(name !== '新しい作品' || snapshot !== baseline.current);
@@ -62,7 +63,7 @@ export function ProjectPanel({ onNavigate }: { onNavigate: (step: ProductionStep
     check();
     const timer = setInterval(check, 1000);
     return () => clearInterval(timer);
-  }, [capture, name]);
+  }, [capture, name, partsReady]);
   useEffect(() => {
     if (!dirty || !saved) return;
     const prevent = (event: BeforeUnloadEvent) => {
@@ -393,7 +394,7 @@ export function ProjectPanel({ onNavigate }: { onNavigate: (step: ProductionStep
             onChange={(e) => void inspect(e.target.files?.[0])}
           />
           <ProjectArchive
-            disabled={loading || !!pending}
+            disabled={loading || !partsReady || !!pending}
             getProject={currentSnapshot}
             onLockChange={setArchiveLocked}
           />

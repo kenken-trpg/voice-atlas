@@ -31,6 +31,7 @@ type Context = {
   initial: VoiceProject | null;
   loadError: string;
   register: (part: ProjectPart, source: Source) => () => void;
+  partsReady: boolean;
   capture: () => ProjectDocuments;
   ensureIdle: () => void;
   commit: (project: VoiceProject, remount: boolean) => void;
@@ -88,9 +89,12 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [irodoriAudioRevision, setIrodoriAudioRevision] = useState(0);
   const [loadError, setLoadError] = useState(loaded.error);
   const [revision, setRevision] = useState(0);
+  // The lazy casting workspace owns most parts; snapshots are partial until it registers.
+  const [partsReady, setPartsReady] = useState(false);
   const sources = useRef(new Map<ProjectPart, Source>());
   const register = useRef<Context['register']>((part, source) => {
     sources.current.set(part, source);
+    if (part === 'casting') setPartsReady(true);
     return () => {
       if (sources.current.get(part) === source) sources.current.delete(part);
     };
@@ -150,6 +154,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         initial,
         loadError,
         register,
+        partsReady,
         capture,
         ensureIdle,
         commit,
